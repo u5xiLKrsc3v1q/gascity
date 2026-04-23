@@ -556,6 +556,7 @@ func Instantiate(ctx context.Context, store beads.Store, recipe *formula.Recipe,
 			if opts.IdempotencyKey != "" {
 				b.Metadata["idempotency_key"] = opts.IdempotencyKey
 			}
+			stampFormulaVars(vars, &b)
 		} else {
 			// graph.v2 workflows and their retry/Ralph attempt sub-recipes
 			// use step beads as independently routable actionable work, not
@@ -1038,6 +1039,23 @@ func deferBeadMetadataValue(b *beads.Bead, sourceKey, deferredKey string) {
 func ensureBeadMetadata(b *beads.Bead) {
 	if b.Metadata == nil {
 		b.Metadata = make(map[string]string, 1)
+	}
+}
+
+const formulaVarMetadataPrefix = "gc.var."
+
+// stampFormulaVars records non-empty formula input vars on the root bead as
+// gc.var.<name> metadata so they are discoverable from the parent alone
+// without traversing sub-step descriptions.
+func stampFormulaVars(vars map[string]string, b *beads.Bead) {
+	if len(vars) == 0 {
+		return
+	}
+	ensureBeadMetadata(b)
+	for k, v := range vars {
+		if v != "" {
+			b.Metadata[formulaVarMetadataPrefix+k] = v
+		}
 	}
 }
 
