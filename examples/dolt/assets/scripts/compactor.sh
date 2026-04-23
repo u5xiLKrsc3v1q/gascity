@@ -101,6 +101,12 @@ for DB in $DATABASES; do
         printf '%s|%s\n' "$TBL" "$CNT" >> "$pre_file"
     done
 
+    # Idempotent cleanup: if a prior run died between CALL DOLT_BRANCH('flatten-tmp')
+    # and its matching '-D' delete, the orphan branch would block this run's
+    # DOLT_BRANCH call with "branch already exists" and permanently lock this DB
+    # out of compaction. Mirrors the existing `|| true` defensive pattern.
+    dolt_sql -q "USE \`$DB\`; CALL DOLT_BRANCH('-D', 'flatten-tmp')" 2>/dev/null || true
+
     # The flatten recipe runs in a single session so DOLT_BRANCH /
     # DOLT_CHECKOUT / DOLT_RESET / DOLT_COMMIT share session state
     # (branch + transaction). DOLT_GC must run in a separate session

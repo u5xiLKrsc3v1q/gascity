@@ -49,7 +49,22 @@ case "$*" in
         printf 'COUNT(*)\n%s\n' "${COMPACTOR_TEST_COMMITS:-9999}"
         ;;
     *issues*)
-        printf 'COUNT(*)\n42\n'
+        # When COMPACTOR_TEST_POST_MISMATCH is set, track invocation count
+        # via DOLT_COUNTER_FILE and return 42 for the first call (pre-flight)
+        # and 99 for subsequent calls (post-flight) so the integrity check
+        # sees row-count divergence.
+        if [ -n "$COMPACTOR_TEST_POST_MISMATCH" ] && [ -n "$DOLT_COUNTER_FILE" ]; then
+            n=$(cat "$DOLT_COUNTER_FILE" 2>/dev/null || echo 0)
+            n=$((n + 1))
+            echo "$n" > "$DOLT_COUNTER_FILE"
+            if [ "$n" -gt 1 ]; then
+                printf 'COUNT(*)\n99\n'
+            else
+                printf 'COUNT(*)\n42\n'
+            fi
+        else
+            printf 'COUNT(*)\n42\n'
+        fi
         ;;
     *)
         :
@@ -83,7 +98,8 @@ func runCompactor(t *testing.T, env map[string]string) (stdout string) {
 	base := filteredEnv("GC_CITY_PATH", "GC_PACK_DIR", "GC_DOLT_PORT", "GC_DOLT_HOST",
 		"GC_DOLT_USER", "GC_DOLT_PASSWORD", "GC_COMPACTOR_THRESHOLD",
 		"GC_COMPACTOR_DRY_RUN", "DOLT_ARGS_LOG", "DOLT_STDIN_LOG",
-		"COMPACTOR_TEST_COMMITS", "PATH")
+		"COMPACTOR_TEST_COMMITS", "COMPACTOR_TEST_POST_MISMATCH",
+		"DOLT_COUNTER_FILE", "PATH")
 	for k, v := range env {
 		base = append(base, k+"="+v)
 	}
@@ -298,6 +314,53 @@ func TestCompactorScriptDryRunSkipsMutation(t *testing.T) {
 	argData, _ := os.ReadFile(doltLog)
 	if strings.Contains(string(argData), "DOLT_GC") {
 		t.Fatalf("dry-run invoked DOLT_GC:\n%s", argData)
+	}
+}
+
+func TestCompactorScriptEscalatesOnIntegrityMismatch(t *testing.T) {
+	cityPath := t.TempDir()
+	binDir := t.TempDir()
+	doltLog := filepath.Join(t.TempDir(), "dolt-args.log")
+	stdinLog := filepath.Join(t.TempDir(), "dolt-stdin.log")
+	gcLog := filepath.Join(t.TempDir(), "gc.log")
+	counterFile := filepath.Join(t.TempDir(), "dolt-counter")
+
+	writeCompactorDoltStub(t, filepath.Join(binDir, "dolt"))
+	writeCompactorGCStub(t, filepath.Join(binDir, "gc"), gcLog)
+
+	runCompactor(t, map[string]string{
+		"GC_CITY_PATH":                 cityPath,
+		"GC_PACK_DIR":                  repoRoot(t),
+		"GC_DOLT_HOST":                 "127.0.0.1",
+		"GC_DOLT_PORT":                 "3307",
+		"GC_DOLT_USER":                 "root",
+		"GC_DOLT_PASSWORD":             "",
+		"GC_COMPACTOR_THRESHOLD":       "500",
+		"COMPACTOR_TEST_COMMITS":       "9999",
+		"COMPACTOR_TEST_POST_MISMATCH": "1",
+		"DOLT_COUNTER_FILE":            counterFile,
+		"DOLT_ARGS_LOG":                doltLog,
+		"DOLT_STDIN_LOG":               stdinLog,
+		"PATH":                         binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+	})
+
+	gcData, err := os.ReadFile(gcLog)
+	if err != nil {
+		t.Fatalf("ReadFile(gc log): %v", err)
+	}
+	gcOut := string(gcData)
+	for _, want := range []string{"mail send mayor/", "[CRITICAL]"} {
+		if !strings.Contains(gcOut, want) {
+			t.Fatalf("integrity-mismatch escalation missing %q in gc invocations:\n%s", want, gcOut)
+		}
+	}
+
+	argData, err := os.ReadFile(doltLog)
+	if err != nil {
+		t.Fatalf("ReadFile(dolt args log): %v", err)
+	}
+	if strings.Contains(string(argData), "DOLT_GC") {
+		t.Fatalf("DOLT_GC must be skipped when integrity check fails:\n%s", argData)
 	}
 }
 
