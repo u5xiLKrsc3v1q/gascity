@@ -103,6 +103,7 @@
           "guides/migrating-to-pack-vnext",
           "guides/shareable-packs",
           "guides/using-json-from-gc"
+          "guides/gitignore"
         ]
       },
       {
