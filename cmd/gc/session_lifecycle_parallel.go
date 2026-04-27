@@ -32,6 +32,18 @@ const (
 	staleKeyDetectDelay = 2 * time.Second
 )
 
+// stopPerTargetTimeoutDefault caps the wall-clock time stopTargetsBounded
+// will wait for any single target's lifecycle op (worker Stop/Interrupt
+// boundary). The cap is intentionally wider than KillSessionWithProcesses'
+// 4s SIGTERM-then-SIGKILL grace. Test-overridable; production value is 30s.
+var stopPerTargetTimeoutDefault = 30 * time.Second
+
+// interruptPerTargetTimeoutMargin is the headroom added on top of
+// cfg.Daemon.ShutdownTimeoutDuration() when computing the interrupt wave's
+// per-target timeout. The base shutdown grace is the post-interrupt wait;
+// this margin covers dispatch/tmux latency for the interrupt itself.
+var interruptPerTargetTimeoutMargin = 2 * time.Second
+
 type startCandidate struct {
 	session *beads.Bead
 	tp      TemplateParams
@@ -1016,11 +1028,20 @@ func reachableSelectedDependencies(
 	return reachable
 }
 
+// executeTargetWave runs each target's run() under a bounded-parallelism
+// semaphore and returns a stopResult per target. perTargetTimeout caps the
+// wall-clock each goroutine waits for run() to return; on expiry, that
+// target's outcome is "timed_out" and the inner goroutine is intentionally
+// leaked (it will return when the bounded subprocess deadline kicks in or
+// the process exits). perTargetTimeout <= 0 means no timeout (legacy
+// behavior, used only by tests that exercise unrelated paths).
 func executeTargetWave(
 	targets []stopTarget,
 	maxParallel int,
+	perTargetTimeout time.Duration,
 	run func(stopTarget) error,
 ) []stopResult {
+	_ = perTargetTimeout // RED stub: parameter accepted but not yet honored.
 	if len(targets) == 0 {
 		return nil
 	}
@@ -1214,6 +1235,21 @@ func stopTargetThroughWorkerBoundary(target stopTarget, store beads.Store, sp ru
 	return workerStopSessionTargetWithConfig("", store, sp, cfg, targetID)
 }
 
+// interruptPerTargetTimeout returns the wall-clock cap an interrupt-wave
+// goroutine waits before declaring its target timed out. It composes the
+// configured shutdown grace (which is the post-interrupt wait the caller
+// itself imposes) with a small dispatch margin for the interrupt syscalls
+// themselves.
+func interruptPerTargetTimeout(cfg *config.City) time.Duration {
+	base := 5 * time.Second
+	if cfg != nil {
+		if d := cfg.Daemon.ShutdownTimeoutDuration(); d > 0 {
+			base = d
+		}
+	}
+	return base + interruptPerTargetTimeoutMargin
+}
+
 func interruptTargetsBounded(targets []stopTarget, cfg *config.City, store beads.Store, sp runtime.Provider, stderr io.Writer) int {
 	targets = hydrateStopTargets(targets, cfg, store, stderr)
 	// Pool-managed sessions have no human user, so Claude Code's
@@ -1237,7 +1273,7 @@ func interruptTargetsBounded(targets []stopTarget, cfg *config.City, store beads
 
 	sent := 0
 	waveStarted := time.Now()
-	results := executeTargetWave(interruptable, min(len(interruptable), defaultMaxParallelInterrupts), func(target stopTarget) error {
+	results := executeTargetWave(interruptable, min(len(interruptable), defaultMaxParallelInterrupts), interruptPerTargetTimeout(cfg), func(target stopTarget) error {
 		targetID := strings.TrimSpace(target.sessionID)
 		if targetID == "" {
 			targetID = strings.TrimSpace(target.name)
@@ -1276,7 +1312,7 @@ func stopTargetsBounded(
 			stopped := 0
 			for wave, target := range targets {
 				waveStarted := time.Now()
-				results := executeTargetWave([]stopTarget{target}, 1, func(target stopTarget) error {
+				results := executeTargetWave([]stopTarget{target}, 1, stopPerTargetTimeoutDefault, func(target stopTarget) error {
 					return stopTargetThroughWorkerBoundary(target, store, sp, cfg)
 				})
 				for _, result := range results {
@@ -1318,7 +1354,7 @@ func stopTargetsBounded(
 				waveTargets = append(waveTargets, target)
 			}
 		}
-		results := executeTargetWave(waveTargets, defaultMaxParallelStopsPerWave, func(target stopTarget) error {
+		results := executeTargetWave(waveTargets, defaultMaxParallelStopsPerWave, stopPerTargetTimeoutDefault, func(target stopTarget) error {
 			return stopTargetThroughWorkerBoundary(target, store, sp, cfg)
 		})
 		for _, result := range results {

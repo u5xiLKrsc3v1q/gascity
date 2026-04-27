@@ -1926,7 +1926,7 @@ func TestExecutePreparedStartWave_PanicIncludesStackTrace(t *testing.T) {
 }
 
 func TestExecuteTargetWave_PanicIncludesStackTrace(t *testing.T) {
-	results := executeTargetWave([]stopTarget{{name: "worker"}}, 1, func(stopTarget) error {
+	results := executeTargetWave([]stopTarget{{name: "worker"}}, 1, time.Second, func(stopTarget) error {
 		panic("boom")
 	})
 	if len(results) != 1 {
