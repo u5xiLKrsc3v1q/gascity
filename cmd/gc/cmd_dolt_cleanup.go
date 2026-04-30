@@ -6,7 +6,9 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -163,7 +165,7 @@ func runDoltCleanup(opts cleanupOptions, stdout, stderr io.Writer) int {
 			Source:   resolution.Source,
 			Fallback: resolution.Fallback,
 		},
-		RigsProtected: rigProtections(opts.Rigs),
+		RigsProtected: rigProtections(opts.Rigs, opts.FS),
 	}
 
 	if opts.Probe {
@@ -376,16 +378,44 @@ schema (gc.dolt.cleanup.v1) is stable from day one.`,
 
 
 // rigProtections projects the resolver's rig list into the JSON-envelope
-// rigs_protected entries. Each rig's DB name equals its rig name in the gc
-// data model (`gascity`, `beads`, etc.). Order is HQ-first to match the
-// port-resolution preference, so the human-readable PROTECTED section and
-// JSON output enumerate rigs in the same operator-meaningful order.
-func rigProtections(rigs []resolverRig) []CleanupRigProtection {
+// rigs_protected entries. The DB name is read from each rig's
+// <rigPath>/.beads/metadata.json `dolt_database` field; rig.Name is used as
+// a fallback when metadata is missing or doesn't specify dolt_database.
+// Reading the actual DB name is required for the drop step's safety
+// guarantee (refuse to drop any DB whose name matches a registered rig DB)
+// to hold when an operator chose a dolt_database name that differs from
+// the registered rig name. Order is HQ-first to match the port-resolution
+// preference.
+func rigProtections(rigs []resolverRig, fs fsys.FS) []CleanupRigProtection {
 	out := make([]CleanupRigProtection, 0, len(rigs))
 	for _, r := range orderRigsHQFirst(rigs) {
-		out = append(out, CleanupRigProtection{Rig: r.Name, DB: r.Name})
+		out = append(out, CleanupRigProtection{Rig: r.Name, DB: rigDoltDatabaseName(r, fs)})
 	}
 	return out
+}
+
+// rigDoltDatabaseName returns the rig's dolt database name as recorded in
+// its metadata.json, falling back to rig.Name when metadata is missing or
+// silent on dolt_database.
+func rigDoltDatabaseName(r resolverRig, fs fsys.FS) string {
+	if fs == nil {
+		return r.Name
+	}
+	data, err := fs.ReadFile(filepath.Join(r.Path, ".beads", "metadata.json"))
+	if err != nil {
+		return r.Name
+	}
+	var meta map[string]any
+	if json.Unmarshal(data, &meta) != nil {
+		return r.Name
+	}
+	if db, ok := meta["dolt_database"]; ok {
+		s := strings.TrimSpace(fmt.Sprint(db))
+		if s != "" && s != "<nil>" {
+			return s
+		}
+	}
+	return r.Name
 }
 
 // loadResolverRigs builds the resolver's rig list from a city config. The HQ

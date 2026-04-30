@@ -288,6 +288,70 @@ func TestRunDoltCleanup_ForceRecordsKillError(t *testing.T) {
 	}
 }
 
+func TestRunDoltCleanup_RigsProtectedReadsDoltDatabaseFromMetadata(t *testing.T) {
+	// When a rig's metadata.json sets dolt_database, the protection entry MUST
+	// use that value as DB (not the rig name) so the drop step doesn't
+	// accidentally target a rig DB whose operator-chosen name differs from
+	// the rig's registered name. Falls back to rig.Name when metadata is
+	// missing or doesn't specify dolt_database.
+	fs := fsys.NewFake()
+	fs.Files["/city/.beads/metadata.json"] = []byte(`{"dolt_database":"hq"}`)
+	fs.Files["/rigs/foo/.beads/metadata.json"] = []byte(`{"dolt_database":"foo_db"}`)
+	fs.Files["/rigs/bar/.beads/metadata.json"] = []byte(`{"database":"sqlite"}`) // no dolt_database
+	// /rigs/missing has no metadata.json at all.
+
+	rigs := []resolverRig{
+		{Name: "city", Path: "/city", HQ: true},
+		{Name: "foo", Path: "/rigs/foo"},
+		{Name: "bar", Path: "/rigs/bar"},
+		{Name: "missing", Path: "/rigs/missing"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cleanupOptions{
+		Rigs:  rigs,
+		FS:    fs,
+		JSON:  true,
+		Probe: false,
+	}
+	code := runDoltCleanup(opts, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runDoltCleanup exit=%d, stderr=%q", code, stderr.String())
+	}
+
+	var r CleanupReport
+	if err := json.Unmarshal(stdout.Bytes(), &r); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	want := []CleanupRigProtection{
+		{Rig: "city", DB: "hq"},          // from metadata
+		{Rig: "foo", DB: "foo_db"},       // from metadata
+		{Rig: "bar", DB: "bar"},          // metadata present but no dolt_database — fall back to rig.Name
+		{Rig: "missing", DB: "missing"},  // no metadata — fall back to rig.Name
+	}
+	if len(r.RigsProtected) != len(want) {
+		t.Fatalf("RigsProtected len = %d, want %d (got %+v)", len(r.RigsProtected), len(want), r.RigsProtected)
+	}
+	for i, w := range want {
+		if r.RigsProtected[i] != w {
+			t.Errorf("RigsProtected[%d] = %+v, want %+v", i, r.RigsProtected[i], w)
+		}
+	}
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func equalIntSlice(a, b []int) bool {
 	if len(a) != len(b) {
 		return false
