@@ -57,7 +57,11 @@ type CleanupRigProtection struct {
 type CleanupDroppedReport struct {
 	Count      int                  `json:"count"`
 	BytesFreed int64                `json:"bytes_freed"`
-	Failed     []CleanupDropFailure `json:"failed"`
+	// Names lists the databases the drop step targeted: the candidates in
+	// dry-run, the actually-dropped names in --force. Order follows the
+	// SHOW DATABASES result.
+	Names  []string             `json:"names"`
+	Failed []CleanupDropFailure `json:"failed"`
 }
 
 // CleanupDropFailure records a single drop step that did not complete.
@@ -74,9 +78,20 @@ type CleanupPurgeReport struct {
 
 // CleanupReapedReport summarises the orphan-process reap step.
 type CleanupReapedReport struct {
-	Count         int      `json:"count"`
-	ProtectedPIDs []int    `json:"protected_pids"`
-	Errors        []string `json:"errors"`
+	Count         int                 `json:"count"`
+	ProtectedPIDs []int               `json:"protected_pids"`
+	// Targets records the PIDs the reaper identified as test orphans (the
+	// reap candidates). Populated in both dry-run and --force; --force
+	// additionally drives Count to reflect actually-killed processes.
+	Targets []CleanupReapTarget `json:"targets"`
+	Errors  []string            `json:"errors"`
+}
+
+// CleanupReapTarget is a single orphan dolt sql-server process the reaper
+// identified for termination.
+type CleanupReapTarget struct {
+	PID        int    `json:"pid"`
+	ConfigPath string `json:"config_path"`
 }
 
 // CleanupSummary aggregates totals across the three steps.
@@ -107,8 +122,14 @@ func (r CleanupReport) MarshalJSON() ([]byte, error) {
 	if r.Reaped.ProtectedPIDs == nil {
 		r.Reaped.ProtectedPIDs = []int{}
 	}
+	if r.Reaped.Targets == nil {
+		r.Reaped.Targets = []CleanupReapTarget{}
+	}
 	if r.Reaped.Errors == nil {
 		r.Reaped.Errors = []string{}
+	}
+	if r.Dropped.Names == nil {
+		r.Dropped.Names = []string{}
 	}
 	if r.Errors == nil {
 		r.Errors = []CleanupError{}
@@ -228,6 +249,13 @@ func runReapStage(report *CleanupReport, opts cleanupOptions) {
 	for _, p := range plan.Protected {
 		report.Reaped.ProtectedPIDs = append(report.Reaped.ProtectedPIDs, p.PID)
 	}
+	report.Reaped.Targets = nil
+	for _, t := range plan.Reap {
+		report.Reaped.Targets = append(report.Reaped.Targets, CleanupReapTarget{
+			PID:        t.PID,
+			ConfigPath: t.ConfigPath,
+		})
+	}
 
 	if !opts.Force {
 		report.Reaped.Count = len(plan.Reap)
@@ -277,18 +305,135 @@ func emitReport(report CleanupReport, resolution PortResolution, opts cleanupOpt
 		return
 	}
 
+	emitHumanReport(report, resolution, opts, stdout)
+}
+
+// emitHumanReport writes the operator-facing wireframe to stdout. Output is
+// plain text with small unicode glyphs (⚠ ✓ ✖) — no ANSI escapes — so it
+// behaves correctly under NO_COLOR or when piped to a file.
+func emitHumanReport(report CleanupReport, resolution PortResolution, opts cleanupOptions, stdout io.Writer) {
 	host := opts.Host
 	if host == "" {
 		host = "127.0.0.1"
 	}
 	if resolution.Fallback {
-		fmt.Fprintf(stdout, "⚠ Dolt server port: %d (legacy default — fallback)\n", resolution.Port)             //nolint:errcheck
-		fmt.Fprintln(stdout, "  Tried sources, in order:")                                                        //nolint:errcheck
+		fmt.Fprintf(stdout, "⚠ Dolt server port: %d (legacy default — fallback)\n", resolution.Port) //nolint:errcheck
+		fmt.Fprintln(stdout, "  Tried sources, in order:")                                            //nolint:errcheck
 		for _, attempt := range resolution.Tried {
-			fmt.Fprintf(stdout, "    %-46s  %s\n", attempt.Source, attemptStatusLabel(attempt))                   //nolint:errcheck
+			fmt.Fprintf(stdout, "    %-46s  %s\n", attempt.Source, attemptStatusLabel(attempt)) //nolint:errcheck
 		}
 	} else {
 		fmt.Fprintf(stdout, "Dolt server: %s:%d (resolved from %s)\n", host, resolution.Port, resolution.Source) //nolint:errcheck
+	}
+
+	emitDroppedSection(report, stdout)
+	emitOrphansSection(report, stdout)
+	emitProtectedSection(report, stdout)
+	emitErrorsOrSummary(report, opts, stdout)
+	if !opts.Force {
+		fmt.Fprintln(stdout, "")                                  //nolint:errcheck
+		fmt.Fprintln(stdout, "Re-run with --force to apply.")     //nolint:errcheck
+	}
+}
+
+func emitDroppedSection(report CleanupReport, stdout io.Writer) {
+	fmt.Fprintln(stdout, "")                                                                                  //nolint:errcheck
+	fmt.Fprintf(stdout, "DROPPED-DATABASE DIRECTORIES (%d)\n", report.Dropped.Count)                         //nolint:errcheck
+	if len(report.Dropped.Names) == 0 {
+		fmt.Fprintln(stdout, "  (none)") //nolint:errcheck
+		return
+	}
+	for _, name := range report.Dropped.Names {
+		fmt.Fprintf(stdout, "  %s\n", name) //nolint:errcheck
+	}
+	for _, f := range report.Dropped.Failed {
+		fmt.Fprintf(stdout, "  ✖ %s — %s\n", f.Name, f.Error) //nolint:errcheck
+	}
+}
+
+func emitOrphansSection(report CleanupReport, stdout io.Writer) {
+	fmt.Fprintln(stdout, "")                                                                                                          //nolint:errcheck
+	fmt.Fprintf(stdout, "ORPHAN dolt sql-server PROCESSES (%d)\n", len(report.Reaped.Targets))                                       //nolint:errcheck
+	if len(report.Reaped.Targets) == 0 {
+		fmt.Fprintln(stdout, "  (none)") //nolint:errcheck
+		return
+	}
+	for _, t := range report.Reaped.Targets {
+		path := t.ConfigPath
+		if path == "" {
+			path = "(no --config flag)"
+		}
+		fmt.Fprintf(stdout, "  PID %d  %s\n", t.PID, path) //nolint:errcheck
+	}
+}
+
+func emitProtectedSection(report CleanupReport, stdout io.Writer) {
+	fmt.Fprintln(stdout, "")             //nolint:errcheck
+	fmt.Fprintln(stdout, "PROTECTED")    //nolint:errcheck
+	if len(report.RigsProtected) == 0 && len(report.Reaped.ProtectedPIDs) == 0 {
+		fmt.Fprintln(stdout, "  (none)") //nolint:errcheck
+		return
+	}
+	for _, rp := range report.RigsProtected {
+		fmt.Fprintf(stdout, "  rig %q → DB %q\n", rp.Rig, rp.DB) //nolint:errcheck
+	}
+	for _, pid := range report.Reaped.ProtectedPIDs {
+		fmt.Fprintf(stdout, "  PID %d (active server or non-test path)\n", pid) //nolint:errcheck
+	}
+}
+
+func emitErrorsOrSummary(report CleanupReport, opts cleanupOptions, stdout io.Writer) {
+	fmt.Fprintln(stdout, "") //nolint:errcheck
+	if len(report.Errors) > 0 {
+		fmt.Fprintf(stdout, "ERRORS (%d)\n", len(report.Errors)) //nolint:errcheck
+		for _, e := range report.Errors {
+			if e.Name != "" {
+				fmt.Fprintf(stdout, "  [%s] %s — %s\n", e.Stage, e.Name, e.Error) //nolint:errcheck
+			} else {
+				fmt.Fprintf(stdout, "  [%s] %s\n", e.Stage, e.Error) //nolint:errcheck
+			}
+		}
+		fmt.Fprintln(stdout, "") //nolint:errcheck
+	}
+
+	fmt.Fprintln(stdout, "SUMMARY") //nolint:errcheck
+	verb := "would free"
+	if opts.Force {
+		verb = "freed"
+	}
+	fmt.Fprintf(stdout, "  Disk %s:    %s\n", verb, formatBytes(report.Purge.BytesReclaimed))                  //nolint:errcheck
+	fmt.Fprintf(stdout, "  Drops:         %d (failed: %d)\n", report.Dropped.Count, len(report.Dropped.Failed)) //nolint:errcheck
+	purgeStatus := "skipped"
+	if opts.Force {
+		if report.Purge.OK {
+			purgeStatus = "ok"
+		} else {
+			purgeStatus = "failed"
+		}
+	}
+	fmt.Fprintf(stdout, "  Purge:         %s\n", purgeStatus)                            //nolint:errcheck
+	fmt.Fprintf(stdout, "  Reaped:        %d (protected: %d)\n", report.Reaped.Count, len(report.Reaped.ProtectedPIDs)) //nolint:errcheck
+	fmt.Fprintf(stdout, "  Errors:        %d\n", report.Summary.ErrorsTotal)             //nolint:errcheck
+}
+
+// formatBytes formats a byte count as "N B", "N.N KiB", "N.N MiB", or
+// "N.N GiB" — the binary-prefix scale operators expect for disk
+// reclamation reports.
+func formatBytes(n int64) string {
+	const (
+		KiB int64 = 1 << 10
+		MiB int64 = 1 << 20
+		GiB int64 = 1 << 30
+	)
+	switch {
+	case n >= GiB:
+		return fmt.Sprintf("%.1f GiB", float64(n)/float64(GiB))
+	case n >= MiB:
+		return fmt.Sprintf("%.1f MiB", float64(n)/float64(MiB))
+	case n >= KiB:
+		return fmt.Sprintf("%.1f KiB", float64(n)/float64(KiB))
+	default:
+		return fmt.Sprintf("%d B", n)
 	}
 }
 

@@ -63,6 +63,7 @@ func runDropStage(report *CleanupReport, opts cleanupOptions) {
 
 	plan := planDoltDrops(all, stalePrefixes, protected)
 	report.Dropped.Count = len(plan.ToDrop)
+	report.Dropped.Names = append([]string{}, plan.ToDrop...)
 
 	if !opts.Force {
 		return
