@@ -24,11 +24,13 @@ gc [flags]
 | [gc beads](#gc-beads) | Manage the beads provider |
 | [gc build-image](#gc-build-image) | Build a prebaked agent container image |
 | [gc cities](#gc-cities) | List registered cities |
+| [gc completion](#gc-completion) | Generate the autocompletion script for the specified shell |
 | [gc config](#gc-config) | Inspect and validate city configuration |
 | [gc converge](#gc-converge) | Manage convergence loops (bounded iterative refinement) |
 | [gc convoy](#gc-convoy) | Manage convoys — graphs of related work |
 | [gc dashboard](#gc-dashboard) | Web dashboard for monitoring the supervisor and managed cities |
 | [gc doctor](#gc-doctor) | Check workspace health |
+| [gc dolt-cleanup](#gc-dolt-cleanup) | Find and remove orphaned Dolt databases (Go-side core) |
 | [gc event](#gc-event) | Event operations |
 | [gc events](#gc-events) | Show events from the GC API |
 | [gc formula](#gc-formula) | Manage and inspect formulas |
@@ -39,6 +41,7 @@ gc [flags]
 | [gc import](#gc-import) | Manage pack imports |
 | [gc init](#gc-init) | Initialize a new city |
 | [gc mail](#gc-mail) | Send and receive messages between agents and humans |
+| [gc maintenance](#gc-maintenance) | Dolt store maintenance (gc + snapshot) |
 | [gc mcp](#gc-mcp) | Inspect projected MCP config |
 | [gc nudge](#gc-nudge) | Inspect and deliver deferred nudges |
 | [gc order](#gc-order) | Manage orders (scheduled and event-driven dispatch) |
@@ -52,6 +55,7 @@ gc [flags]
 | [gc runtime](#gc-runtime) | Process-intrinsic runtime operations |
 | [gc service](#gc-service) | Inspect workspace services |
 | [gc session](#gc-session) | Manage interactive chat sessions |
+| [gc shell](#gc-shell) | Manage the Gas City shell integration hook |
 | [gc skill](#gc-skill) | List visible skills |
 | [gc sling](#gc-sling) | Route work to a session config or agent |
 | [gc start](#gc-start) | Start the city under the machine-wide supervisor |
@@ -164,7 +168,9 @@ gc bd --rig my-project list
 
 Manage the beads provider (backing store for issue tracking).
 
-Subcommands for topology operations, health checking, and diagnostics.
+Subcommands for topology operations, health checking, diagnostics, and
+read-only list/show routed through the supervisor API with transparent
+fallback to direct bd reads.
 
 ```
 gc beads
@@ -174,6 +180,8 @@ gc beads
 |------------|-------------|
 | [gc beads city](#gc-beads-city) | Manage canonical city endpoint topology |
 | [gc beads health](#gc-beads-health) | Check beads provider health |
+| [gc beads list](#gc-beads-list) | List beads (API-routed with bd fallback) |
+| [gc beads show](#gc-beads-show) | Show a single bead (API-routed with bd fallback) |
 
 ## gc beads city
 
@@ -244,6 +252,49 @@ gc beads health
 |------|------|---------|-------------|
 | `--quiet` | bool |  | silent on success, stderr on failure |
 
+## gc beads list
+
+List beads across all rigs, routed through the supervisor API when
+the controller is alive and falling back to a direct multi-store read
+otherwise.
+
+Supports --label, --status, --all, and --format flags. --json is an
+alias for --format=json. API-path JSON output includes _cache_age_s;
+fallback-path JSON omits it.
+
+```
+gc beads list
+```
+
+**Example:**
+
+```
+gc beads list
+  gc beads list --label ready-to-build
+  gc beads list --status open --json
+  gc beads list --format=toon
+```
+
+## gc beads show
+
+Show one bead by ID, routed through the supervisor API when the
+controller is alive and falling back to a direct multi-store lookup
+otherwise.
+
+Supports --format and --json. API-path JSON output includes
+_cache_age_s; fallback-path JSON omits it.
+
+```
+gc beads show <bead-id>
+```
+
+**Example:**
+
+```
+gc beads show ga-abc
+  gc beads show ga-abc --json
+```
+
 ## gc build-image
 
 Assemble a Docker build context from city config, prompts, formulas,
@@ -303,6 +354,127 @@ List registered cities
 ```
 gc cities list
 ```
+
+## gc completion
+
+Generate the autocompletion script for gc for the specified shell.
+See each sub-command's help for details on how to use the generated script.
+
+```
+gc completion
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| [gc completion bash](#gc-completion-bash) | Generate the autocompletion script for bash |
+| [gc completion fish](#gc-completion-fish) | Generate the autocompletion script for fish |
+| [gc completion powershell](#gc-completion-powershell) | Generate the autocompletion script for powershell |
+| [gc completion zsh](#gc-completion-zsh) | Generate the autocompletion script for zsh |
+
+## gc completion bash
+
+Generate the autocompletion script for the bash shell.
+
+This script depends on the 'bash-completion' package.
+If it is not installed already, you can install it via your OS's package manager.
+
+To load completions in your current shell session:
+
+	source &lt;(gc completion bash)
+
+To load completions for every new session, execute once:
+
+#### Linux:
+
+	gc completion bash &gt; /etc/bash_completion.d/gc
+
+#### macOS:
+
+	gc completion bash &gt; $(brew --prefix)/etc/bash_completion.d/gc
+
+You will need to start a new shell for this setup to take effect.
+
+```
+gc completion bash
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--no-descriptions` | bool |  | disable completion descriptions |
+
+## gc completion fish
+
+Generate the autocompletion script for the fish shell.
+
+To load completions in your current shell session:
+
+	gc completion fish | source
+
+To load completions for every new session, execute once:
+
+	gc completion fish &gt; ~/.config/fish/completions/gc.fish
+
+You will need to start a new shell for this setup to take effect.
+
+```
+gc completion fish [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--no-descriptions` | bool |  | disable completion descriptions |
+
+## gc completion powershell
+
+Generate the autocompletion script for powershell.
+
+To load completions in your current shell session:
+
+	gc completion powershell | Out-String | Invoke-Expression
+
+To load completions for every new session, add the output of the above command
+to your powershell profile.
+
+```
+gc completion powershell [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--no-descriptions` | bool |  | disable completion descriptions |
+
+## gc completion zsh
+
+Generate the autocompletion script for the zsh shell.
+
+If shell completion is not already enabled in your environment you will need
+to enable it.  You can execute the following once:
+
+	echo "autoload -U compinit; compinit" &gt;&gt; ~/.zshrc
+
+To load completions in your current shell session:
+
+	source &lt;(gc completion zsh)
+
+To load completions for every new session, execute once:
+
+#### Linux:
+
+	gc completion zsh &gt; "$&#123;fpath[1]&#125;/_gc"
+
+#### macOS:
+
+	gc completion zsh &gt; $(brew --prefix)/share/zsh/site-functions/_gc
+
+You will need to start a new shell for this setup to take effect.
+
+```
+gc completion zsh [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--no-descriptions` | bool |  | disable completion descriptions |
 
 ## gc config
 
@@ -786,6 +958,33 @@ gc doctor
 |------|------|---------|-------------|
 | `--fix` | bool |  | attempt to fix issues automatically |
 | `-v`, `--verbose` | bool |  | show extra diagnostic details |
+
+## gc dolt-cleanup
+
+gc dolt-cleanup is the Go-side implementation of the operational Dolt
+cleanup tool. It resolves the Dolt server port via the AD-04 chain
+(--port &gt; city dolt.port &gt; &lt;rigRoot&gt;/.beads/dolt-server.port &gt; 3307),
+drops stale test/agent databases, calls DOLT_PURGE_DROPPED_DATABASES
+to reclaim disk, and reaps orphaned dolt sql-server processes left
+over from leaked test harnesses.
+
+Dry-run by default. Pass --force to actually drop, purge, and kill.
+Active rig dolt servers, registered rig databases, and processes
+outside the test-config-path allowlist are always protected — see
+the PROTECTED section of the report.
+
+JSON envelope schema is stable: gc.dolt.cleanup.v1.
+
+```
+gc dolt-cleanup [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--force` | bool |  | actually kill orphan dolt sql-server processes (default: dry-run) |
+| `--json` | bool |  | emit JSON envelope (gc.dolt.cleanup.v1) |
+| `--port` | string |  | override the resolved Dolt port |
+| `--probe` | bool |  | TCP-probe the resolved port; fail if unreachable |
 
 ## gc event
 
@@ -1346,6 +1545,47 @@ Show all messages sharing a thread ID, ordered by time.
 gc mail thread <thread-id>
 ```
 
+## gc maintenance
+
+Manage periodic Dolt store maintenance (see docs/adr/0002-dolt-store-maintenance-runbook.md).
+
+The weekly loop runs inside the supervisor process when [maintenance.dolt] enabled=true
+in city.toml. 'status' shows loop state and recent runs; 'dolt-gc' triggers a manual run.
+
+```
+gc maintenance
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| [gc maintenance dolt-gc](#gc-maintenance-dolt-gc) | Trigger a Dolt store maintenance run |
+| [gc maintenance status](#gc-maintenance-status) | Show Dolt store maintenance status |
+
+## gc maintenance dolt-gc
+
+Trigger a Dolt store maintenance run
+
+```
+gc maintenance dolt-gc [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--json` | bool |  | emit machine-readable JSON |
+| `--wait` | bool |  | block until the run completes (exit 1 on failure) |
+
+## gc maintenance status
+
+Show Dolt store maintenance status
+
+```
+gc maintenance status [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--json` | bool |  | emit machine-readable JSON |
+
 ## gc mcp
 
 Inspect the projected MCP catalog for a concrete target.
@@ -1757,6 +1997,10 @@ Set the canonical endpoint ownership for a rig.
 
 Use --inherit to make a rig derive its endpoint from the current city
 topology. Use --external to pin the rig to its own external Dolt endpoint.
+Use --self to mark the rig as running its own local Dolt server on
+127.0.0.1 at the given --port; while the city is in managed_city mode the
+command requires --force because the rig's .beads/dolt-server.port mirror
+will no longer track the managed city Dolt.
 
 This command owns the rig's canonical .beads/config.yaml topology state.
 
@@ -1770,6 +2014,7 @@ gc rig set-endpoint <rig> [flags]
 gc rig set-endpoint frontend --inherit
   gc rig set-endpoint frontend --external --host db.example.com --port 3307
   gc rig set-endpoint frontend --external --host db.example.com --port 3307 --user agent --adopt-unverified
+  gc rig set-endpoint frontend --self --port 28232 --force
   gc rig set-endpoint frontend --inherit --dry-run
 ```
 
@@ -1778,9 +2023,11 @@ gc rig set-endpoint frontend --inherit
 | `--adopt-unverified` | bool |  | record the endpoint without live validation |
 | `--dry-run` | bool |  | show the canonical changes without writing files |
 | `--external` | bool |  | set an explicit external endpoint for the rig |
+| `--force` | bool |  | acknowledge conflicting managed-city state when using --self |
 | `--host` | string |  | external Dolt host |
 | `--inherit` | bool |  | inherit the city endpoint |
-| `--port` | string |  | external Dolt port |
+| `--port` | string |  | external Dolt port (required with --external or --self) |
+| `--self` | bool |  | mark the rig as running its own local Dolt on 127.0.0.1 |
 | `--user` | string |  | external Dolt user |
 
 ## gc rig status
@@ -2252,6 +2499,51 @@ gc session wake gc-42
   gc session wake mayor
 ```
 
+## gc shell
+
+The shell integration adds a completion hook to your shell RC file that
+provides tab-completion for gc commands and flags.
+
+Subcommands: install, remove, status.
+
+```
+gc shell
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| [gc shell install](#gc-shell-install) | Install or update shell integration |
+| [gc shell remove](#gc-shell-remove) | Remove shell integration |
+| [gc shell status](#gc-shell-status) | Show shell integration status |
+
+## gc shell install
+
+Install or update the gc shell completion hook.
+
+If no shell is specified, the shell is detected from $SHELL.
+The completion script is written to ~/.gc/completions/ and a source line
+is added to your shell RC file.
+
+```
+gc shell install [bash|zsh|fish]
+```
+
+## gc shell remove
+
+Remove the gc shell completion hook from your shell RC file and delete the completion script.
+
+```
+gc shell remove
+```
+
+## gc shell status
+
+Show shell integration status
+
+```
+gc shell status
+```
+
 ## gc skill
 
 List skills visible to the current city.
@@ -2357,6 +2649,7 @@ gc start
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `-n`, `--dry-run` | bool |  | preview what agents would start without starting them |
+| `--no-auto-restart` | bool |  | detect supervisor binary/pack drift but do not auto-restart; exits non-zero on drift |
 
 ## gc status
 
@@ -2380,9 +2673,19 @@ shutdown timeout, then force-kills any remaining sessions. Also stops
 the Dolt server and cleans up orphan sessions. If a controller is
 running, delegates shutdown to it.
 
+Use --timeout=DURATION to cap the wall-clock time gc stop will spend
+before giving up; the default derives from the configured shutdown
+grace times a fudge factor. Use --force to skip the interrupt grace
+period and go straight to kill.
+
 ```
-gc stop [path]
+gc stop [path] [flags]
 ```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--force` | bool |  | skip the interrupt grace period and force-kill all sessions immediately |
+| `--timeout` | duration | `0s` | wall-clock cap for the stop sequence (0 = derive from city config) |
 
 ## gc supervisor
 
