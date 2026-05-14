@@ -59,7 +59,7 @@ func bdStoreForRig(rigDir, cityPath string, cfg *config.City, knownPrefix ...str
 }
 
 func controlBdStoreForCity(dir, cityPath string, cfg *config.City) *beads.BdStore {
-	return beads.NewBdStoreWithPrefix(dir, controlBdCommandRunnerForCity(cityPath), issuePrefixForScope(dir, cityPath, cfg))
+	return beads.NewBdStoreWithPrefixAndOptions(dir, controlBdCommandRunnerForCity(cityPath), issuePrefixForScope(dir, cityPath, cfg), beads.BdStoreOptions{NoHistory: true})
 }
 
 func controlBdStoreForRig(rigDir, cityPath string, cfg *config.City, knownPrefix ...string) *beads.BdStore {
@@ -72,7 +72,7 @@ func controlBdStoreForRig(rigDir, cityPath string, cfg *config.City, knownPrefix
 			}
 		}
 	}
-	return beads.NewBdStoreWithPrefix(rigDir, controlBdCommandRunnerForRig(cityPath, cfg, rigDir), prefix)
+	return beads.NewBdStoreWithPrefixAndOptions(rigDir, controlBdCommandRunnerForRig(cityPath, cfg, rigDir), prefix, beads.BdStoreOptions{NoHistory: true})
 }
 
 func controlBdCommandRunnerForCity(cityPath string) beads.CommandRunner {
