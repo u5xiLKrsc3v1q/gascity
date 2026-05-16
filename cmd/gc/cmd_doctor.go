@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/beads/contract"
@@ -22,6 +23,7 @@ var (
 
 func newDoctorCmd(stdout, stderr io.Writer) *cobra.Command {
 	var fix, verbose bool
+	emergencyTTL := defaultEmergencyProcessedTTL
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check workspace health",
@@ -36,7 +38,7 @@ health. Use --fix to attempt automatic repairs.`,
   gc doctor --verbose`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if doDoctor(fix, verbose, stdout, stderr) != 0 {
+			if doDoctorWithOptions(fix, verbose, stdout, stderr, doctorRunOptions{emergencyTTL: emergencyTTL}) != 0 {
 				return errExit
 			}
 			return nil
@@ -44,10 +46,14 @@ health. Use --fix to attempt automatic repairs.`,
 	}
 	cmd.Flags().BoolVar(&fix, "fix", false, "attempt to fix issues automatically")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show extra diagnostic details")
+	cmd.Flags().DurationVar(&emergencyTTL, "emergency-ttl", defaultEmergencyProcessedTTL, "processed emergency record TTL before pruning with --fix")
 	return cmd
 }
 
-// doDoctor runs all health checks and prints results.
+type doctorRunOptions struct {
+	emergencyTTL time.Duration
+}
+
 func doctorSkipsDoltChecks(cityPath string) bool {
 	if gcDoltSkip() {
 		return true
@@ -116,7 +122,15 @@ func (c *doltTopologyCheck) CanFix() bool { return false }
 
 func (c *doltTopologyCheck) Fix(_ *doctor.CheckContext) error { return nil }
 
-func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
+// doDoctor runs all health checks and prints results.
+func doDoctor(verbose bool, stdout, stderr io.Writer) {
+	doDoctorWithOptions(false, verbose, stdout, stderr, doctorRunOptions{emergencyTTL: defaultEmergencyProcessedTTL})
+}
+
+func doDoctorWithOptions(fix, verbose bool, stdout, stderr io.Writer, opts doctorRunOptions) int {
+	if opts.emergencyTTL <= 0 {
+		opts.emergencyTTL = defaultEmergencyProcessedTTL
+	}
 	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc doctor: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -218,6 +232,7 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 	d.Register(doctor.NewScopedDoltVersionCheckForConfig(cityPath, skipManagedDoltCheck, cfg, cfgErr))
 	d.Register(&doctor.EventsLogCheck{})
 	d.Register(doctor.NewEventLogSizeCheck())
+	d.Register(newEmergencySpoolCheck(cityPath, opts.emergencyTTL, nil))
 	// Worktree checks deliberately run even when cfgErr != nil — they
 	// only need the city path, and a broken city.toml is exactly when
 	// silent disk-fill is most likely. The zero-value DoctorConfig

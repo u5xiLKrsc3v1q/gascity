@@ -179,6 +179,20 @@ func TestCityPackTomlParses(t *testing.T) {
 	}
 }
 
+func TestMayorWorkQuerySurfacesEmergencyHookInjection(t *testing.T) {
+	path := filepath.Join(exampleDir(), "packs", "gastown", "agents", "mayor", "agent.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading mayor agent.toml: %v", err)
+	}
+	assertContainsInOrder(t, string(data),
+		"work_query",
+		"gc emergency list --format hook-injection --limit 20",
+		"|| true",
+		"bd ready --metadata-field gc.routed_to={{.Agent}}",
+	)
+}
+
 func TestCityTomlValidates(t *testing.T) {
 	cfg := loadExpanded(t)
 	if err := config.ValidateAgents(cfg.Agents); err != nil {

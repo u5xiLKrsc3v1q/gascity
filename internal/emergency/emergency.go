@@ -173,12 +173,12 @@ func WriteSpool(cityPath string, rec Record) (string, error) {
 
 // RecordSignaled records an emergency.signaled event for rec.
 func RecordSignaled(recorder events.Recorder, rec Record) error {
-	return recordEmergencyEvent(recorder, events.EmergencySignaled, rec)
+	return recordEmergencyEventWithActor(recorder, events.EmergencySignaled, rec, rec.Actor)
 }
 
 // RecordAcked records an emergency.acked event for rec.
 func RecordAcked(recorder events.Recorder, rec Record) error {
-	return recordEmergencyEvent(recorder, events.EmergencyAcked, rec)
+	return recordEmergencyEventWithActor(recorder, events.EmergencyAcked, rec, rec.Actor)
 }
 
 // RecordSignaledToCityLog mirrors rec to the city-local events.jsonl file.
@@ -239,9 +239,13 @@ func MarkNotifyDedupe(cityPath, key string, now time.Time, ttl time.Duration) (D
 	return DedupeResult{Fire: true, KeyPrefix: prefix, Age: age}, nil
 }
 
-func recordEmergencyEvent(recorder events.Recorder, eventType string, rec Record) error {
+func recordEmergencyEventWithActor(recorder events.Recorder, eventType string, rec Record, actor string) error {
 	if recorder == nil {
 		return fmt.Errorf("events recorder is nil")
+	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		actor = rec.Actor
 	}
 	payload, err := json.Marshal(rec)
 	if err != nil {
@@ -249,7 +253,7 @@ func recordEmergencyEvent(recorder events.Recorder, eventType string, rec Record
 	}
 	recorder.Record(events.Event{
 		Type:    eventType,
-		Actor:   rec.Actor,
+		Actor:   actor,
 		Subject: rec.ID,
 		Message: rec.Message,
 		Payload: payload,

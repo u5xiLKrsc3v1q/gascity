@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -29,6 +30,15 @@ type emergencySendOptions struct {
 	bodyFile string
 }
 
+type emergencyListOptions struct {
+	all        bool
+	limit      int
+	format     string
+	since      string
+	severities []string
+	actor      string
+}
+
 func newEmergencyCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "emergency",
@@ -44,6 +54,9 @@ func newEmergencyCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(newEmergencySendCmd(stdout, stderr))
+	cmd.AddCommand(newEmergencyListCmd(stdout, stderr))
+	cmd.AddCommand(newEmergencyShowCmd(stdout, stderr))
+	cmd.AddCommand(newEmergencyAckCmd(stdout, stderr))
 	return cmd
 }
 
@@ -71,6 +84,49 @@ notification system.`,
 	cmd.Flags().BoolVar(&opts.quiet, "quiet", false, "suppress OS notification regardless of severity")
 	cmd.Flags().StringVar(&opts.message, "message", "", "message body (alternative to positional)")
 	cmd.Flags().StringVar(&opts.bodyFile, "body-file", "", "read message from file (\"-\" = stdin)")
+	return cmd
+}
+
+func newEmergencyListCmd(stdout, stderr io.Writer) *cobra.Command {
+	opts := emergencyListOptions{format: "table"}
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List emergency signals",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return exitForCode(cmdEmergencyList(opts, stdout, stderr))
+		},
+	}
+	cmd.Flags().BoolVar(&opts.all, "all", false, "include processed entries")
+	cmd.Flags().IntVar(&opts.limit, "limit", 0, "maximum entries (default 50, or 20 for hook-injection)")
+	cmd.Flags().StringVar(&opts.format, "format", "table", "table|json|hook-injection")
+	cmd.Flags().StringVar(&opts.since, "since", "", "only entries newer than duration ago (for example 24h)")
+	cmd.Flags().StringArrayVar(&opts.severities, "severity", nil, "filter by severity (repeatable)")
+	cmd.Flags().StringVar(&opts.actor, "actor", "", "filter by actor substring")
+	return cmd
+}
+
+func newEmergencyShowCmd(stdout, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "show <id>",
+		Short: "Show one emergency signal",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return exitForCode(cmdEmergencyShow(args[0], stdout, stderr))
+		},
+	}
+	return cmd
+}
+
+func newEmergencyAckCmd(stdout, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ack <id>",
+		Short: "Acknowledge one emergency signal",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return exitForCode(cmdEmergencyAck(args[0], stdout, stderr))
+		},
+	}
 	return cmd
 }
 
@@ -140,6 +196,170 @@ func cmdEmergencySend(cmd *cobra.Command, args []string, opts emergencySendOptio
 	maybeNotifyEmergency(cityPath, rec, opts, stderr)
 	fmt.Fprintln(stdout, rec.ID) //nolint:errcheck // best-effort stdout
 	return 0
+}
+
+func cmdEmergencyList(opts emergencyListOptions, stdout, stderr io.Writer) int {
+	format := strings.TrimSpace(opts.format)
+	switch format {
+	case "table", "json", "hook-injection":
+	default:
+		fmt.Fprintf(stderr, "gc emergency list: invalid --format %q\n", opts.format) //nolint:errcheck // best-effort stderr
+		return 2
+	}
+	limit := opts.limit
+	if limit == 0 {
+		limit = 50
+		if format == "hook-injection" {
+			limit = 20
+		}
+	}
+	if limit < 0 {
+		fmt.Fprintln(stderr, "gc emergency list: --limit must be non-negative") //nolint:errcheck // best-effort stderr
+		return 2
+	}
+	now := time.Now().UTC()
+	var since time.Time
+	if strings.TrimSpace(opts.since) != "" {
+		d, err := time.ParseDuration(strings.TrimSpace(opts.since))
+		if err != nil || d < 0 {
+			fmt.Fprintf(stderr, "gc emergency list: invalid --since %q\n", opts.since) //nolint:errcheck // best-effort stderr
+			return 2
+		}
+		since = now.Add(-d)
+	}
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc emergency list: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	result, err := emergency.ListRecords(cityPath, emergency.ListOptions{
+		IncludeAcked:   opts.all,
+		Since:          since,
+		Severities:     opts.severities,
+		ActorSubstring: opts.actor,
+		Limit:          limit,
+		Now:            now,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "gc emergency list: %v\n", err) //nolint:errcheck // best-effort stderr
+		if strings.Contains(err.Error(), "severity") {
+			return 2
+		}
+		return 1
+	}
+	switch format {
+	case "json":
+		for _, entry := range result.Entries {
+			data, err := json.Marshal(entry.Record)
+			if err != nil {
+				fmt.Fprintf(stderr, "gc emergency list: encoding record %q: %v\n", entry.Record.ID, err) //nolint:errcheck
+				return 1
+			}
+			fmt.Fprintln(stdout, string(data)) //nolint:errcheck // best-effort stdout
+		}
+	case "hook-injection":
+		fmt.Fprint(stdout, emergency.RenderHookInjection(result, now)) //nolint:errcheck // best-effort stdout
+	default:
+		writeEmergencyTable(stdout, result, now, opts.all)
+	}
+	return 0
+}
+
+func cmdEmergencyShow(id string, stdout, stderr io.Writer) int {
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc emergency show: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	entry, err := emergency.ShowRecord(cityPath, id)
+	if err != nil {
+		if errors.Is(err, emergency.ErrInvalidID) {
+			fmt.Fprintf(stderr, "gc emergency show: invalid id format: %q\n", id) //nolint:errcheck // best-effort stderr
+			return 2
+		}
+		if errors.Is(err, emergency.ErrNotFound) {
+			fmt.Fprintf(stderr, "gc emergency show: no such emergency: %q\n", id) //nolint:errcheck // best-effort stderr
+			return 2
+		}
+		fmt.Fprintf(stderr, "gc emergency show: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	data, err := json.MarshalIndent(entry.Record, "", "  ")
+	if err != nil {
+		fmt.Fprintf(stderr, "gc emergency show: encoding record %q: %v\n", entry.Record.ID, err) //nolint:errcheck
+		return 1
+	}
+	fmt.Fprintln(stdout, string(data)) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+func cmdEmergencyAck(id string, stdout, stderr io.Writer) int {
+	cityPath, err := resolveCity()
+	if err != nil {
+		fmt.Fprintf(stderr, "gc emergency ack: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	result, err := emergency.AckRecord(cityPath, id, time.Now().UTC())
+	if err != nil {
+		if errors.Is(err, emergency.ErrInvalidID) {
+			fmt.Fprintf(stderr, "gc emergency ack: invalid id format: %q\n", id) //nolint:errcheck // best-effort stderr
+			return 2
+		}
+		if errors.Is(err, emergency.ErrNotFound) {
+			fmt.Fprintf(stderr, "gc emergency ack: no such emergency: %q\n", id) //nolint:errcheck // best-effort stderr
+			return 2
+		}
+		fmt.Fprintf(stderr, "gc emergency ack: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+	if result.AlreadyAcked {
+		if !result.Entry.AckedAt.IsZero() {
+			fmt.Fprintf(stdout, "already acked: %s (acked %s ago)\n", result.Entry.Record.ID, emergency.FormatAge(time.Now().UTC(), result.Entry.AckedAt)) //nolint:errcheck
+		} else {
+			fmt.Fprintf(stdout, "already acked: %s\n", result.Entry.Record.ID) //nolint:errcheck
+		}
+		return 0
+	}
+	actor := eventActor()
+	if err := emergency.RecordAckedToCityLog(cityPath, result.Entry.Record, actor, stderr); err != nil {
+		fmt.Fprintf(stderr, "gc emergency ack: events recorder error: %v\n", err) //nolint:errcheck // best-effort stderr
+	}
+	fmt.Fprintf(stdout, "acked: %s\n", result.Entry.Record.ID) //nolint:errcheck // best-effort stdout
+	return 0
+}
+
+func writeEmergencyTable(stdout io.Writer, result emergency.ListResult, now time.Time, all bool) {
+	if len(result.Entries) == 0 {
+		if all {
+			fmt.Fprintf(stdout, "0 entries. 0 unacked, 0 acked.\n") //nolint:errcheck // best-effort stdout
+			return
+		}
+		fmt.Fprintf(stdout, "0 unacked.\n") //nolint:errcheck // best-effort stdout
+		return
+	}
+	if all {
+		fmt.Fprintf(stdout, "%-31s %-8s %-5s %-6s %-26s %-56s %s\n", "ID", "SEVERITY", "AGE", "STATUS", "ACTOR", "MESSAGE", "REF") //nolint:errcheck
+	} else {
+		fmt.Fprintf(stdout, "%-31s %-8s %-5s %-26s %-56s %s\n", "ID", "SEVERITY", "AGE", "ACTOR", "MESSAGE", "REF") //nolint:errcheck
+	}
+	for _, entry := range result.Entries {
+		rec := entry.Record
+		ref := strings.TrimSpace(rec.RefBead)
+		if ref == "" {
+			ref = "-"
+		}
+		message := truncateEmergencyTable(rec.Message, 55)
+		if all {
+			fmt.Fprintf(stdout, "%-31s %-8s %-5s %-6s %-26s %-56s %s\n", rec.ID, rec.Severity, emergency.FormatAge(now, rec.CreatedAt), entry.Status, rec.Actor, message, ref) //nolint:errcheck
+		} else {
+			fmt.Fprintf(stdout, "%-31s %-8s %-5s %-26s %-56s %s\n", rec.ID, rec.Severity, emergency.FormatAge(now, rec.CreatedAt), rec.Actor, message, ref) //nolint:errcheck
+		}
+	}
+	if all {
+		fmt.Fprintf(stdout, "\n%d entries. %d unacked, %d acked.\n", result.Total, result.Open, result.Acked) //nolint:errcheck
+		return
+	}
+	fmt.Fprintf(stdout, "\n%d unacked. Run `gc emergency ack <ID>` to clear.\n", result.Open) //nolint:errcheck
 }
 
 func resolveEmergencyMessage(args []string, messageFlag, bodyFile string, stdin io.Reader) (string, error) {
@@ -278,4 +498,15 @@ func maybeNotifyEmergency(cityPath string, rec emergency.Record, opts emergencyS
 		return
 	}
 	fmt.Fprintf(stderr, "gc emergency send: %s fired\n", result.Backend) //nolint:errcheck // best-effort stderr
+}
+
+func truncateEmergencyTable(message string, limit int) string {
+	msg := strings.Join(strings.Fields(message), " ")
+	if limit <= 0 || len(msg) <= limit {
+		return msg
+	}
+	if limit <= 3 {
+		return msg[:limit]
+	}
+	return msg[:limit-3] + "..."
 }

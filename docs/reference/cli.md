@@ -963,6 +963,7 @@ gc doctor
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
+| `--emergency-ttl` | duration | `168h0m0s` | processed emergency record TTL before pruning with --fix |
 | `--fix` | bool |  | attempt to fix issues automatically |
 | `-v`, `--verbose` | bool |  | show extra diagnostic details |
 
@@ -1027,7 +1028,35 @@ gc emergency
 
 | Subcommand | Description |
 |------------|-------------|
+| [gc emergency ack](#gc-emergency-ack) | Acknowledge one emergency signal |
+| [gc emergency list](#gc-emergency-list) | List emergency signals |
 | [gc emergency send](#gc-emergency-send) | Send a dolt-independent emergency signal |
+| [gc emergency show](#gc-emergency-show) | Show one emergency signal |
+
+## gc emergency ack
+
+Acknowledge one emergency signal
+
+```
+gc emergency ack <id>
+```
+
+## gc emergency list
+
+List emergency signals
+
+```
+gc emergency list [flags]
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--actor` | string |  | filter by actor substring |
+| `--all` | bool |  | include processed entries |
+| `--format` | string | `table` | table\|json\|hook-injection |
+| `--limit` | int |  | maximum entries (default 50, or 20 for hook-injection) |
+| `--severity` | stringArray |  | filter by severity (repeatable) |
+| `--since` | string |  | only entries newer than duration ago (for example 24h) |
 
 ## gc emergency send
 
@@ -1052,6 +1081,14 @@ gc emergency send [flags] [<message>]
 | `--quiet` | bool |  | suppress OS notification regardless of severity |
 | `--ref` | string |  | related bead id |
 | `-s`, `--severity` | string | `error` | info\|warn\|error\|critical |
+
+## gc emergency show
+
+Show one emergency signal
+
+```
+gc emergency show <id>
+```
 
 ## gc event
 
