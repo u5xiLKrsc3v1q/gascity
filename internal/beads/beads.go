@@ -40,6 +40,10 @@ type Bead struct {
 	// garbage collection. Reads must opt in via ListQuery.TierMode (or the
 	// WithEphemeral/WithBothTiers QueryOpts on the legacy label helpers).
 	Ephemeral bool `json:"ephemeral,omitempty"`
+	// NoHistory routes the bead to Beads' no-history storage on Create. Beads
+	// stores no-history rows in the wisps table to skip Dolt commits, but they
+	// are not ephemeral and are not Beads-GC eligible.
+	NoHistory bool `json:"no_history,omitempty"`
 }
 
 // UpdateOpts specifies which fields to change. Nil pointers are skipped.

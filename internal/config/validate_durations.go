@@ -50,6 +50,11 @@ func ValidateDurations(cfg *City, source string) []string {
 
 	for name, policy := range cfg.Beads.Policies {
 		check(fmt.Sprintf("[beads.policies.%s]", name), "delete_after_close", policy.DeleteAfterClose)
+		if !ValidBeadPolicyStorage(policy.Storage) {
+			warnings = append(warnings, fmt.Sprintf(
+				"%s: [beads.policies.%s] storage = %q is not valid: must be one of %q, %q, or %q",
+				source, name, policy.Storage, BeadStorageHistory, BeadStorageNoHistory, BeadStorageEphemeral))
+		}
 	}
 
 	// Chat sessions config durations.

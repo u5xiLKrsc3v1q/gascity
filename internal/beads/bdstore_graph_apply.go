@@ -14,6 +14,9 @@ func (s *BdStore) ApplyGraphPlan(_ context.Context, plan *GraphApplyPlan) (*Grap
 	if plan == nil {
 		return nil, fmt.Errorf("graph apply plan is nil")
 	}
+	if plan.Ephemeral && plan.NoHistory {
+		return nil, fmt.Errorf("bd create --graph: ephemeral and no_history are mutually exclusive")
+	}
 
 	data, err := json.Marshal(plan)
 	if err != nil {
@@ -40,7 +43,15 @@ func (s *BdStore) ApplyGraphPlan(_ context.Context, plan *GraphApplyPlan) (*Grap
 		return nil, fmt.Errorf("closing graph apply temp file: %w", err)
 	}
 
-	out, err := s.runner(s.dir, "bd", "create", "--graph", tmpPath, "--json")
+	args := []string{"create", "--graph", tmpPath}
+	if plan.Ephemeral {
+		args = append(args, "--ephemeral")
+	}
+	if plan.NoHistory {
+		args = append(args, "--no-history")
+	}
+	args = append(args, "--json")
+	out, err := s.runner(s.dir, "bd", args...)
 	if err != nil {
 		return nil, fmt.Errorf("bd create --graph: %w", err)
 	}

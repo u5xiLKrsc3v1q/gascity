@@ -932,6 +932,32 @@ type BeadPolicyConfig struct {
 	DeleteAfterClose string `toml:"delete_after_close,omitempty"`
 }
 
+const (
+	// BeadStorageHistory stores beads in the normal history-tracked table.
+	BeadStorageHistory = "history"
+	// BeadStorageNoHistory stores beads without Dolt history while keeping
+	// non-ephemeral semantics.
+	BeadStorageNoHistory = "no_history"
+	// BeadStorageEphemeral stores beads as ephemeral wisps.
+	BeadStorageEphemeral = "ephemeral"
+)
+
+// NormalizeBeadPolicyStorage canonicalizes a bead policy storage value.
+func NormalizeBeadPolicyStorage(storage string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(storage)), "-", "_")
+}
+
+// ValidBeadPolicyStorage reports whether storage is one of the supported
+// Beads storage classes. Empty storage is valid and means use the default.
+func ValidBeadPolicyStorage(storage string) bool {
+	switch NormalizeBeadPolicyStorage(storage) {
+	case "", BeadStorageHistory, BeadStorageNoHistory, BeadStorageEphemeral:
+		return true
+	default:
+		return false
+	}
+}
+
 // DeleteAfterCloseDuration returns DeleteAfterClose as a duration. The parser
 // accepts Go durations plus whole-day "d" units, e.g. "7d" and "1d12h".
 func (p BeadPolicyConfig) DeleteAfterCloseDuration() time.Duration {

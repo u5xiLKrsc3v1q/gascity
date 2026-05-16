@@ -394,6 +394,7 @@ type bdIssue struct {
 	Metadata     StringMap    `json:"metadata,omitempty"`
 	Dependencies []bdIssueDep `json:"dependencies,omitempty"`
 	Ephemeral    bool         `json:"ephemeral,omitempty"`
+	NoHistory    bool         `json:"no_history,omitempty"`
 }
 
 type bdIssueDep struct {
@@ -519,6 +520,7 @@ func (b *bdIssue) toBead() Bead {
 		Metadata:     b.Metadata,
 		Dependencies: deps,
 		Ephemeral:    b.Ephemeral,
+		NoHistory:    b.NoHistory,
 	}
 	if b.UpdatedAt != nil {
 		bead.UpdatedAt = b.UpdatedAt.Truncate(time.Second)
@@ -588,6 +590,9 @@ func mapBdStatus(s string) string {
 
 // Create persists a new bead via bd create.
 func (s *BdStore) Create(b Bead) (Bead, error) {
+	if b.Ephemeral && b.NoHistory {
+		return Bead{}, fmt.Errorf("bd create: ephemeral and no_history are mutually exclusive")
+	}
 	typ := b.Type
 	if typ == "" {
 		typ = "task"
@@ -613,6 +618,9 @@ func (s *BdStore) Create(b Bead) (Bead, error) {
 	}
 	if b.Ephemeral {
 		args = append(args, "--ephemeral")
+	}
+	if b.NoHistory {
+		args = append(args, "--no-history")
 	}
 	metadata := maps.Clone(b.Metadata)
 	if b.From != "" {

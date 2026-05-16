@@ -2512,6 +2512,44 @@ func TestBdStoreApplyGraphPlan(t *testing.T) {
 	}
 }
 
+func TestBdStoreApplyGraphPlanPassesStorageFlags(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		plan     beads.GraphApplyPlan
+		wantFlag string
+	}{
+		{
+			name:     "ephemeral",
+			plan:     beads.GraphApplyPlan{Ephemeral: true, Nodes: []beads.GraphApplyNode{{Key: "root", Title: "Root"}}},
+			wantFlag: "--ephemeral",
+		},
+		{
+			name:     "no_history",
+			plan:     beads.GraphApplyPlan{NoHistory: true, Nodes: []beads.GraphApplyNode{{Key: "root", Title: "Root"}}},
+			wantFlag: "--no-history",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotArgs []string
+			runner := func(_ string, _ string, args ...string) ([]byte, error) {
+				gotArgs = append([]string(nil), args...)
+				return []byte(`{"ids":{"root":"bd-1"}}`), nil
+			}
+			s := beads.NewBdStore(t.TempDir(), runner)
+			if _, err := s.ApplyGraphPlan(t.Context(), &tt.plan); err != nil {
+				t.Fatalf("ApplyGraphPlan: %v", err)
+			}
+			args := strings.Join(gotArgs, " ")
+			if !strings.Contains(args, tt.wantFlag) {
+				t.Fatalf("args = %q, want %s", args, tt.wantFlag)
+			}
+			if !strings.HasSuffix(args, " --json") {
+				t.Fatalf("args = %q, want --json last", args)
+			}
+		})
+	}
+}
+
 func TestBdStoreApplyGraphPlanRejectsMissingIDs(t *testing.T) {
 	dir := t.TempDir()
 	runner := func(string, string, ...string) ([]byte, error) {
@@ -2555,6 +2593,47 @@ func TestBdStoreCreatePassesEphemeralFlag(t *testing.T) {
 	}
 }
 
+func TestBdStoreCreatePassesNoHistoryFlag(t *testing.T) {
+	var gotArgs []string
+	runner := func(_, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		return []byte(`{"id":"bd-nh","title":"session","status":"open","issue_type":"session","created_at":"2026-05-01T00:00:00Z","no_history":true}`), nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	created, err := s.Create(beads.Bead{Title: "session", Type: "session", NoHistory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(gotArgs, " ")
+	if !strings.Contains(args, "--no-history") {
+		t.Fatalf("args = %q, want --no-history flag", args)
+	}
+	if strings.Contains(args, "--ephemeral") {
+		t.Fatalf("args = %q, must not contain --ephemeral for no-history bead", args)
+	}
+	if !created.NoHistory {
+		t.Fatalf("created.NoHistory = false, want true")
+	}
+	if created.Ephemeral {
+		t.Fatalf("created.Ephemeral = true, want false for no-history bead")
+	}
+}
+
+func TestBdStoreCreateRejectsEphemeralAndNoHistory(t *testing.T) {
+	runner := func(_, _ string, _ ...string) ([]byte, error) {
+		t.Fatal("runner must not be called for invalid storage flags")
+		return nil, nil
+	}
+	s := beads.NewBdStore("/city", runner)
+	_, err := s.Create(beads.Bead{Title: "bad", Ephemeral: true, NoHistory: true})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("error = %q, want mutually exclusive detail", err)
+	}
+}
+
 func TestBdStoreCreateOmitsEphemeralFlagByDefault(t *testing.T) {
 	var gotArgs []string
 	runner := func(_, _ string, args ...string) ([]byte, error) {
@@ -2567,6 +2646,37 @@ func TestBdStoreCreateOmitsEphemeralFlagByDefault(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(gotArgs, " "), "--ephemeral") {
 		t.Fatalf("args = %q, must not contain --ephemeral", gotArgs)
+	}
+	if strings.Contains(strings.Join(gotArgs, " "), "--no-history") {
+		t.Fatalf("args = %q, must not contain --no-history", gotArgs)
+	}
+}
+
+func TestBdStoreListByLabelKeepsHistoryAndNoHistoryRows(t *testing.T) {
+	runner := fakeRunner(map[string]struct {
+		out []byte
+		err error
+	}{
+		`bd list --json --label=gc:session --include-infra --include-gates --limit 0`: {
+			out: []byte(`[
+				{"id":"bd-old","title":"old session","status":"open","issue_type":"session","created_at":"2026-05-01T00:00:00Z","labels":["gc:session"]},
+				{"id":"bd-wisp-nh","title":"new session","status":"open","issue_type":"session","created_at":"2026-05-01T00:00:01Z","labels":["gc:session"],"no_history":true}
+			]`),
+		},
+	})
+	s := beads.NewBdStore("/city", runner)
+	got, err := s.List(beads.ListQuery{Label: "gc:session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d rows, want history and no-history rows: %+v", len(got), got)
+	}
+	if got[0].ID != "bd-old" || got[0].NoHistory {
+		t.Fatalf("first row = %+v, want historical issue row", got[0])
+	}
+	if got[1].ID != "bd-wisp-nh" || !got[1].NoHistory || got[1].Ephemeral {
+		t.Fatalf("second row = %+v, want no-history row", got[1])
 	}
 }
 

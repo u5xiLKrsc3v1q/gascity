@@ -18,6 +18,12 @@ type GraphApplyPlan struct {
 	CommitMessage string           `json:"commit_message,omitempty"`
 	Nodes         []GraphApplyNode `json:"nodes"`
 	Edges         []GraphApplyEdge `json:"edges,omitempty"`
+	// Ephemeral applies Beads' --ephemeral graph-create storage mode to every
+	// node. It is transported as a bd CLI flag, not as part of the graph JSON.
+	Ephemeral bool `json:"-"`
+	// NoHistory applies Beads' --no-history graph-create storage mode to every
+	// node. It is transported as a bd CLI flag, not as part of the graph JSON.
+	NoHistory bool `json:"-"`
 }
 
 // GraphApplyNode describes a single bead to create.

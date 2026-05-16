@@ -112,6 +112,26 @@ func TestValidateDurationsBadBeadPolicy(t *testing.T) {
 	}
 }
 
+func TestValidateDurationsBadBeadPolicyStorage(t *testing.T) {
+	cfg := &City{
+		Beads: BeadsConfig{
+			Policies: map[string]BeadPolicyConfig{
+				"session": {Storage: "forever-ish"},
+			},
+		},
+	}
+	warnings := ValidateDurations(cfg, "city.toml")
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
+	}
+	if !strings.Contains(warnings[0], "[beads.policies.session]") {
+		t.Errorf("warning should mention bead policy: %s", warnings[0])
+	}
+	if !strings.Contains(warnings[0], "storage") {
+		t.Errorf("warning should mention field: %s", warnings[0])
+	}
+}
+
 func TestValidateDurationsBadPoolDrainTimeout(t *testing.T) {
 	cfg := &City{
 		Agents: []Agent{
