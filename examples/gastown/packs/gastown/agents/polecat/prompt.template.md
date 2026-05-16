@@ -46,6 +46,8 @@ You work on assigned issues and submit completed work to the Refinery merge queu
 
 {{ template "architecture" . }}
 
+{{ template "emergency-signaling" . }}
+
 ## Work Bead Metadata Contract
 
 Work beads carry structured metadata for lifecycle tracking and handoff:

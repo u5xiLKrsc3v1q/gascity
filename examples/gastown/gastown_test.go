@@ -193,6 +193,91 @@ func TestMayorWorkQuerySurfacesEmergencyHookInjection(t *testing.T) {
 	)
 }
 
+func TestEmergencySignalingGuidanceInRenderedPrompts(t *testing.T) {
+	workerPrompts := []struct {
+		name         string
+		rel          string
+		agentName    string
+		templateName string
+		rigName      string
+	}{
+		{
+			name:         "boot",
+			rel:          "packs/gastown/agents/boot/prompt.template.md",
+			agentName:    "boot",
+			templateName: "boot",
+			rigName:      "gastown",
+		},
+		{
+			name:         "crew",
+			rel:          "packs/gastown/assets/prompts/crew.template.md",
+			agentName:    "gascity/crew",
+			templateName: "crew",
+			rigName:      "gascity",
+		},
+		{
+			name:         "deacon",
+			rel:          "packs/gastown/agents/deacon/prompt.template.md",
+			agentName:    "deacon",
+			templateName: "deacon",
+			rigName:      "gastown",
+		},
+		{
+			name:         "polecat",
+			rel:          "packs/gastown/agents/polecat/prompt.template.md",
+			agentName:    "gascity/gastown.polecat",
+			templateName: "polecat",
+			rigName:      "gascity",
+		},
+		{
+			name:         "refinery",
+			rel:          "packs/gastown/agents/refinery/prompt.template.md",
+			agentName:    "gascity/gastown.refinery",
+			templateName: "refinery",
+			rigName:      "gascity",
+		},
+		{
+			name:         "witness",
+			rel:          "packs/gastown/agents/witness/prompt.template.md",
+			agentName:    "gascity/gastown.witness",
+			templateName: "witness",
+			rigName:      "gascity",
+		},
+	}
+	for _, prompt := range workerPrompts {
+		t.Run(prompt.name, func(t *testing.T) {
+			body := renderGastownPromptForPack(t, prompt.rel, prompt.agentName, prompt.templateName, prompt.rigName, "gastown", "gastown.")
+			for _, want := range []string{
+				"When the Reporting Channel Itself Is Broken",
+				"gc emergency send -s critical",
+				"do not silently give up",
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s missing emergency-signaling guidance %q", prompt.rel, want)
+				}
+			}
+			if strings.Contains(body, "Surfacing Agent Emergencies") {
+				t.Fatalf("%s contains mayor emergency receiver guidance", prompt.rel)
+			}
+		})
+	}
+
+	mayor := renderGastownPromptForPack(t, "packs/gastown/agents/mayor/prompt.template.md", "mayor", "mayor", "gastown", "gastown", "gastown.")
+	if strings.Contains(mayor, "When the Reporting Channel Itself Is Broken") {
+		t.Fatalf("mayor prompt contains worker emergency-signaling guidance")
+	}
+	for _, want := range []string{
+		"Surfacing Agent Emergencies",
+		"gc emergency ack <id>",
+		"gc emergency list --all",
+		"gc doctor",
+	} {
+		if !strings.Contains(mayor, want) {
+			t.Fatalf("mayor prompt missing emergency receiver guidance %q", want)
+		}
+	}
+}
+
 func TestCityTomlValidates(t *testing.T) {
 	cfg := loadExpanded(t)
 	if err := config.ValidateAgents(cfg.Agents); err != nil {

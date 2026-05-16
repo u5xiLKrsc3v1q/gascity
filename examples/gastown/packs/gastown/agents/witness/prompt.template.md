@@ -34,6 +34,8 @@ reuse polecat or refinery worktrees as your home.
 
 {{ template "architecture" . }}
 
+{{ template "emergency-signaling" . }}
+
 ---
 
 ## Canonical Work Chain

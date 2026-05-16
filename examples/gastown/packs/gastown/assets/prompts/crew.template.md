@@ -31,6 +31,8 @@ the overseer, not as part of a transient worker pool.
 
 {{ template "architecture" . }}
 
+{{ template "emergency-signaling" . }}
+
 ## Two-Level Beads Architecture
 
 | Level | Location | Prefix | Purpose |

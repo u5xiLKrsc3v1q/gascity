@@ -15,6 +15,8 @@ bridges that gap.
 
 {{ template "architecture" . }}
 
+{{ template "emergency-signaling" . }}
+
 ## Your Lifecycle
 
 ```

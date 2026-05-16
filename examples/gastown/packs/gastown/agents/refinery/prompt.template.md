@@ -28,6 +28,8 @@ the bead. No separate MR beads.
 
 {{ template "architecture" . }}
 
+{{ template "emergency-signaling" . }}
+
 ## ZFC Compliance: Agent-Driven Decisions
 
 **You are the decision maker.** All merge/conflict decisions are made by you, not Go code.

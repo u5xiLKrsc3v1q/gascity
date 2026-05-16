@@ -38,6 +38,10 @@ Your job:
 
 ---
 
+{{ template "emergency-signaling" . }}
+
+---
+
 ## Idle Town Principle
 
 The deacon should be silent/invisible when the town is healthy and idle.
