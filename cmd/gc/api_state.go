@@ -115,7 +115,8 @@ func newControllerState(
 // wrapWithCachingStore wraps a BdStore with a CachingStore that primes
 // and starts a background reconciler. Non-BdStore stores are returned as-is.
 func wrapWithCachingStore(ctx context.Context, store beads.Store, ep events.Provider) beads.Store {
-	bdStore, ok := store.(*beads.BdStore)
+	baseStore, policyStore, policyWrapped := unwrapBeadPolicyStore(store)
+	bdStore, ok := baseStore.(*beads.BdStore)
 	if !ok {
 		return store
 	}
@@ -145,6 +146,9 @@ func wrapWithCachingStore(ctx context.Context, store beads.Store, ep events.Prov
 		log.Printf("caching-store: pre-prime failed: %v", err)
 	}
 	if ctx.Done() == nil {
+		if policyWrapped {
+			return wrapStoreWithBeadPolicies(cs, policyStore.cfg)
+		}
 		return cs
 	}
 	// Full prime runs async — backfills remaining beads for List()
@@ -160,6 +164,9 @@ func wrapWithCachingStore(ctx context.Context, store beads.Store, ep events.Prov
 		}
 		cs.StartReconciler(ctx, beads.WithStaggerAuto(), os.Getenv("GC_AGENT"))
 	}()
+	if policyWrapped {
+		return wrapStoreWithBeadPolicies(cs, policyStore.cfg)
+	}
 	return cs
 }
 
@@ -195,7 +202,7 @@ func (cs *controllerState) buildStores(cfg *config.City) map[string]beads.Store 
 		} else {
 			store = cs.openRigStore(scopeProvider, rig.Name, scopeRoot, rig.EffectivePrefix(), cfg)
 		}
-		stores[rig.Name] = wrapWithCachingStore(cs.cacheCtx, store, cs.eventProv)
+		stores[rig.Name] = wrapWithCachingStore(cs.cacheCtx, wrapStoreWithBeadPolicies(store, cfg), cs.eventProv)
 	}
 	return stores
 }

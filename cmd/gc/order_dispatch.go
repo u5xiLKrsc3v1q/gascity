@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	labelOrderTracking    = "order-tracking"
-	labelTriggerEnvFailed = "trigger-env-failed"
+	labelOrderTracking       = "gc:order-tracking"
+	legacyLabelOrderTracking = "order-tracking"
+	labelTriggerEnvFailed    = "trigger-env-failed"
 
 	orderTrackingSweepOrder                = "order-tracking-sweep"
 	defaultOrderTrackingSweepStaleAfter    = 10 * time.Minute
@@ -356,7 +357,7 @@ func (m *memoryOrderDispatcher) dispatch(ctx context.Context, cityPath string, n
 		// This prevents the cooldown trigger from re-firing on the next tick.
 		trackingBead, err := store.Create(beads.Bead{
 			Title:     "order:" + scoped,
-			Labels:    []string{"order-run:" + scoped, labelOrderTracking},
+			Labels:    orderTrackingLabels(scoped),
 			Ephemeral: true,
 		})
 		if err != nil {
@@ -842,6 +843,32 @@ func (m *memoryOrderDispatcher) rigSuspendedByName(rigName string) bool {
 // caused ga-jra/ga-lo8c, where formula+pool orders stalled indefinitely
 // after a city restart because the first auto-fire's wisp root permanently
 // tripped this check.
+func orderTrackingLabels(scopedName string) []string {
+	return []string{"order-run:" + scopedName, labelOrderTracking}
+}
+
+func listOrderTrackingBeads(store beads.Store) ([]beads.Bead, error) {
+	entries := make([]beads.Bead, 0)
+	seen := make(map[string]struct{})
+	for _, label := range []string{labelOrderTracking, legacyLabelOrderTracking} {
+		items, err := store.ListByLabel(label, 0, beads.WithBothTiers)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			if item.ID == "" {
+				continue
+			}
+			if _, ok := seen[item.ID]; ok {
+				continue
+			}
+			seen[item.ID] = struct{}{}
+			entries = append(entries, item)
+		}
+	}
+	return entries, nil
+}
+
 func (m *memoryOrderDispatcher) hasOpenWorkStrict(store beads.Store, scopedName string) (bool, error) {
 	results, err := store.List(beads.ListQuery{
 		Label:    "order-run:" + scopedName,
@@ -887,7 +914,7 @@ func sweepOrphanedOrderTracking(store beads.Store) (int, error) {
 	// ListByLabel without IncludeClosed returns only open beads.
 	// New tracking beads live in the wisps tier, but legacy issues-tier
 	// tracking beads may still exist after upgrade; sweep both.
-	all, err := store.ListByLabel(labelOrderTracking, 0, beads.WithBothTiers)
+	all, err := listOrderTrackingBeads(store)
 	if err != nil {
 		return 0, fmt.Errorf("listing order-tracking beads: %w", err)
 	}
@@ -929,7 +956,7 @@ func sweepStaleOrderTracking(store beads.Store, now time.Time, staleAfter time.D
 	if staleAfter <= 0 {
 		return 0, fmt.Errorf("stale-after must be positive")
 	}
-	all, err := store.ListByLabel(labelOrderTracking, 0, beads.WithBothTiers)
+	all, err := listOrderTrackingBeads(store)
 	if err != nil {
 		return 0, fmt.Errorf("listing order-tracking beads: %w", err)
 	}
