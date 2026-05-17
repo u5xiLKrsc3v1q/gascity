@@ -84,8 +84,10 @@ template = "mayor"
 	if !ok {
 		t.Fatal("materialize.VendorSink(claude) = not found")
 	}
+	// Under explicit bundled-pack imports, core.gc-* skills load from the
+	// cache rather than .gc/system/packs.
 	wantStdout := fmt.Sprintf(
-		"materialized 8 skill(s) into %s: core.gc-agents, core.gc-city, core.gc-dashboard, core.gc-dispatch, core.gc-mail, core.gc-rigs, core.gc-work, plan\n",
+		"materialized 1 skill(s) into %s: plan\n",
 		filepath.Join(absWorkdir, sinkDir),
 	)
 	if stdout.String() != wantStdout {
