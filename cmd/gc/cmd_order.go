@@ -141,6 +141,7 @@ exit code 0 if any order is due, 1 if none are due.`,
 
 func newOrderHistoryCmd(stdout, stderr io.Writer) *cobra.Command {
 	var rig string
+	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "history [name]",
 		Short: "Show order execution history",
@@ -154,7 +155,7 @@ name. Use --rig to filter by rig.`,
 			if len(args) > 0 {
 				name = args[0]
 			}
-			if cmdOrderHistory(name, rig, stdout, stderr) != 0 {
+			if cmdOrderHistoryJSON(name, rig, jsonOutput, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
@@ -162,6 +163,7 @@ name. Use --rig to filter by rig.`,
 		ValidArgsFunction: completeOrderNames,
 	}
 	cmd.Flags().StringVar(&rig, "rig", "", "rig name to filter order history")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "output JSONL summary")
 	_ = cmd.RegisterFlagCompletionFunc("rig", completeRigFlagNames)
 	return cmd
 }
@@ -848,11 +850,15 @@ func doOrderCheckWithStoresResolverScoped(cityPath string, cfg *config.City, aa 
 // --- gc order history ---
 
 func cmdOrderHistory(name, rig string, stdout, stderr io.Writer) int {
+	return cmdOrderHistoryJSON(name, rig, false, stdout, stderr)
+}
+
+func cmdOrderHistoryJSON(name, rig string, jsonOutput bool, stdout, stderr io.Writer) int {
 	cityPath, cfg, aa, code := loadAllOrdersWithCity(stderr, "gc order history")
 	if code != 0 {
 		return code
 	}
-	return doOrderHistoryWithStoresResolver(name, rig, aa, cachedOrderHistoryStoresResolver(cityPath, cfg, stderr), stdout, stderr)
+	return doOrderHistoryWithStoresResolverJSON(name, rig, aa, cachedOrderHistoryStoresResolver(cityPath, cfg, stderr), jsonOutput, stdout, stderr)
 }
 
 // doOrderHistory queries bead history for order runs and prints a table.
@@ -875,6 +881,10 @@ func doOrderHistoryWithStoreResolver(name, rig string, aa []orders.Order, resolv
 }
 
 func doOrderHistoryWithStoresResolver(name, rig string, aa []orders.Order, resolveStores orderStoresResolver, stdout, stderr io.Writer) int {
+	return doOrderHistoryWithStoresResolverJSON(name, rig, aa, resolveStores, false, stdout, stderr)
+}
+
+func doOrderHistoryWithStoresResolverJSON(name, rig string, aa []orders.Order, resolveStores orderStoresResolver, jsonOutput bool, stdout, stderr io.Writer) int {
 	// Filter orders if name or rig specified.
 	targets := aa
 	if name != "" || rig != "" {
@@ -942,6 +952,17 @@ func doOrderHistoryWithStoresResolver(name, rig string, aa []orders.Order, resol
 	}
 
 	if len(entries) == 0 {
+		if jsonOutput {
+			_ = writeCLIJSONLine(stdout, orderHistoryJSONResult{
+				SchemaVersion: "1",
+				OK:            true,
+				Name:          name,
+				Rig:           rig,
+				Entries:       []orderHistoryJSONEntry{},
+				Summary:       orderHistoryJSONSummary{Total: 0},
+			})
+			return 0
+		}
 		if name != "" {
 			fmt.Fprintf(stdout, "No order history for %q.\n", name) //nolint:errcheck
 		} else {
@@ -953,6 +974,28 @@ func doOrderHistoryWithStoresResolver(name, rig string, aa []orders.Order, resol
 	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].createdAt.After(entries[j].createdAt)
 	})
+
+	if jsonOutput {
+		payload := orderHistoryJSONResult{
+			SchemaVersion: "1",
+			OK:            true,
+			Name:          name,
+			Rig:           rig,
+			Entries:       make([]orderHistoryJSONEntry, 0, len(entries)),
+			Summary:       orderHistoryJSONSummary{Total: len(entries)},
+		}
+		for _, e := range entries {
+			payload.Entries = append(payload.Entries, orderHistoryJSONEntry{
+				Order:     e.order,
+				Rig:       e.rig,
+				BeadID:    e.id,
+				Executed:  e.createdAt.Format(time.RFC3339),
+				CreatedAt: e.createdAt,
+			})
+		}
+		_ = writeCLIJSONLine(stdout, payload)
+		return 0
+	}
 
 	hasRig := false
 	for _, e := range entries {
@@ -978,6 +1021,27 @@ func doOrderHistoryWithStoresResolver(name, rig string, aa []orders.Order, resol
 		}
 	}
 	return 0
+}
+
+type orderHistoryJSONResult struct {
+	SchemaVersion string                  `json:"schema_version"`
+	OK            bool                    `json:"ok"`
+	Name          string                  `json:"name,omitempty"`
+	Rig           string                  `json:"rig,omitempty"`
+	Entries       []orderHistoryJSONEntry `json:"entries"`
+	Summary       orderHistoryJSONSummary `json:"summary"`
+}
+
+type orderHistoryJSONEntry struct {
+	Order     string    `json:"order"`
+	Rig       string    `json:"rig,omitempty"`
+	BeadID    string    `json:"bead_id"`
+	Executed  string    `json:"executed"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type orderHistoryJSONSummary struct {
+	Total int `json:"total"`
 }
 
 // --- gc order sweep-tracking ---
