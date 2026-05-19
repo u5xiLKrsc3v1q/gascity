@@ -51,7 +51,7 @@ needed owner in `Reason`.
   `https://github.com/donbox/gc4gc`; stable and producer/dev branches are
   published separately.
 - `green`: Registry-gc-pack is final machine-move ready at
-  `gastownhall/gascity:codex/pack-registry-workstream` commit `a64fb1ba`.
+  `gastownhall/gascity:codex/pack-registry-workstream` commit `f82f3c4e`.
   Cleo verified that meaningful registry/gc pack work is pushed, old feeder
   branches are superseded or disposable, and the new machine does not need old
   fan-out worktrees. Mabel re-ran the targeted readiness matrix on the old
@@ -81,7 +81,7 @@ Known portable workstreams:
 - JSON: `gastownhall/gascity:codex/json-rollup` is final machine-move ready at
   pushed commit `82a6253d`; review PR is #2349.
 - Registry/gc pack: `gastownhall/gascity:codex/pack-registry-workstream`
-  is final machine-move ready at pushed checkpoint `a64fb1ba`.
+  is final machine-move ready at pushed checkpoint `f82f3c4e`.
 - gc4gc: `donbox/gc4gc:master`, `donbox/gc4gc:codex/gc4gc-producer-dev`, and
   `donbox/gc4gc:codex/gc4gc-producer-snapshot-20260518` exist.
 - Pack deprecation: #2126 is the source of truth for the deprecation train.
@@ -477,7 +477,7 @@ Current implementation worktree:
 - Worktree: `/Users/dbox/repos/gc-pr2119`
 - Current branch: `codex/pack-registry-workstream`
 - Pushed branch: `gastownhall/gascity:codex/pack-registry-workstream`
-- Current checkpoint commit: `a64fb1ba`
+- Current checkpoint commit: `f82f3c4e`
 - State: clean and pushed after registry hardening, first `gc pack`
   dependency-command bridge, docs/reference update, and doctor guard for
   durable `registry:` selectors.
@@ -506,9 +506,9 @@ The registry/gc pack source of truth is now
 
 Mabel refreshed live state on 2026-05-18 PT:
 
-- `gastownhall/gascity:codex/pack-registry-workstream` exists at `a64fb1ba`.
-- The old-machine worktree is clean at `a64fb1ba`.
-- The branch is five commits ahead of `gastownhall/main` and not behind it as
+- `gastownhall/gascity:codex/pack-registry-workstream` exists at `f82f3c4e`.
+- The old-machine worktree is clean at `f82f3c4e`.
+- The branch is six commits ahead of `gastownhall/main` and not behind it as
   of `gastownhall/main@03c80562`.
 - No PR is currently open for `codex/pack-registry-workstream`.
 
@@ -525,7 +525,7 @@ Final machine-move checkpoint:
 - The new machine does not need old fan-out worktrees to continue the
   workstream.
 - The old `/Users/dbox/repos/gc-pr2119` worktree should be kept only until the
-  new machine validates checkpoint `a64fb1ba`.
+  new machine validates checkpoint `f82f3c4e`.
 
 Completed inside the workstream since the preservation checkpoint:
 
@@ -535,6 +535,11 @@ Completed inside the workstream since the preservation checkpoint:
 - `gc pack add/remove/sync/upgrade/why` command bridge. `add` supports registry
   selectors and writes concrete durable import sources while preserving
   registry/ref/hash metadata in `packs.lock`.
+- `gc pack check` thin wrapper over the existing import-state verification
+  path.
+- Product-surface boundary finalized: dependency `gc pack show`,
+  `gc pack outdated`, and canonical dependency `gc pack list` are explicitly
+  deferred. Existing `gc pack list` remains the legacy `[packs]` status command.
 - Legacy `gc pack fetch/list` remain on the old `[packs]` behavior and have
   regression coverage.
 - `gc import` output remains stable through shared handlers; it has not entered
@@ -543,10 +548,9 @@ Completed inside the workstream since the preservation checkpoint:
 
 Next milestone:
 
-- Cleo should do one product-surface pass on remaining command-surface gaps
-  (`gc pack check`, future dependency `list/show/outdated` shape, or explicit
-  deferral), then open the workstream PR. Mabel's refreshed validation found no
-  branch-readiness blocker.
+- Open the workstream PR when D. Box/Mabel are ready to start the registry/gc
+  pack train. Mabel's refreshed validation found no branch-readiness blocker;
+  Cleo completed the final product-surface pass and pushed the result.
 
 ### Attention Needed
 
@@ -613,8 +617,8 @@ File ownership boundaries for Cleo's workstream:
   constraints beyond preserving `gc import migrate` until doctor parity,
   preserving legacy `gc pack fetch/list`, preserving current PackV2 import
   fields, and coordinating before compatibility behavior changes.
-- Cleo: continue from `a64fb1ba`, finish review-prep gaps, then open/update the
-  workstream PR when the final matrix is green.
+- Cleo: continue from `f82f3c4e`; the next action is opening/updating the
+  workstream PR when Mabel/D. Box want the train visible on GitHub.
 
 ### JSON Assumptions
 
@@ -669,6 +673,9 @@ same matrix on 2026-05-18 PT and all four commands passed again:
 - `make check-docs`
 - `git diff --check`
 
+Cleo re-ran the matrix after the final product-surface pass at `f82f3c4e`; all
+four commands passed again.
+
 A broader `go test ./cmd/gc -count=1` attempt was previously stopped after
 running long with no additional output; use the targeted matrix above plus
 CI/full package testing as review prep.
@@ -684,7 +691,7 @@ Additional required gates:
 
 ### Last Updated
 
-2026-05-18 21:53 PT by Mabel
+2026-05-18 21:59 PT by Cleo
 
 ## New Machine Bootstrap
 
@@ -721,7 +728,7 @@ git worktree add -B codex/workstream-coordination /Users/dbox/repos/gc-workstrea
 
 None required. Registry/gc pack implementation state is pushed to
 `origin/codex/pack-registry-workstream` at
-`a64fb1ba`.
+`f82f3c4e`.
 
 Old stashes on the old machine are preservation artifacts only:
 
@@ -766,7 +773,7 @@ Cleo, continue the registry/gc pack workstream from:
 
 - repo: /Users/dbox/repos/gc-pr2119
 - branch: codex/pack-registry-workstream
-- checkpoint commit: a64fb1ba
+- checkpoint commit: f82f3c4e
 - coordination file: /Users/dbox/repos/gc-workstream-coordination/engdocs/coordination/active-workstreams.md
 
 First, refresh upstream/main and the coordination branch, verify the setup with
