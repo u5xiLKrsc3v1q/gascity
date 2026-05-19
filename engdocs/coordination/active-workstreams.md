@@ -1,6 +1,6 @@
 # Active Workstream Coordination
 
-Last updated: 2026-05-18 12:45 PT by Jasmine and Cleo
+Last updated: 2026-05-18 12:58 PT by Mabel
 
 This is a temporary cross-agent coordination channel, not product documentation.
 Do not merge this file into public docs unless we explicitly promote it.
@@ -13,6 +13,39 @@ Severity labels:
 - `red`: blocks another workstream.
 - `yellow`: coordinate before touching the affected area.
 - `green`: informational.
+
+## Attention Protocol
+
+Every workstream handoff should include an attention block so agents can poll
+this file without D. Box becoming the notification bus.
+
+Use this shape:
+
+```markdown
+### Attention Needed
+
+Needs Mabel: yes/no
+
+Needs D. Box: yes/no
+
+Urgency: red/yellow/green
+
+Reason: short factual reason, or "none".
+```
+
+If a workstream is blocked on another agent, mark the urgency and name the
+needed owner in `Reason`.
+
+## Current Attention Summary
+
+- `yellow`: JSON needs Jasmine to assemble and validate `codex/json-rollup`
+  before Cleo freezes registry command schemas/tests.
+- `yellow`: Registry-gc-pack needs Mabel to flag any #2126 constraints that
+  affect `gc import`, legacy `gc pack fetch/list`, or PackV2 import fields.
+- `yellow`: gc4gc / Operational Substrate has not yet published a Grace handoff
+  into this coordination file.
+- `green`: Cleo's dirty registry work has been pushed to a preservation /
+  workstream branch; no meaningful registry local-only state is expected.
 
 ## Communication Mechanism
 
@@ -97,6 +130,17 @@ Excluded from the first train unless repaired:
 - Result schemas live under `schemas/<command-path>/result.schema.json`.
 - Shared failure schema lives at `schemas/failure.schema.json`.
 - Do not introduce `--format json`.
+
+### Attention Needed
+
+Needs Mabel: no
+
+Needs D. Box: no
+
+Urgency: yellow
+
+Reason: Jasmine still needs to assemble and validate `codex/json-rollup`; Cleo
+should not freeze registry command schemas/tests until that update lands.
 
 Structured failure JSON policy:
 
@@ -263,6 +307,18 @@ Related docs/source reconciliation:
 
 - #2318, <https://github.com/gastownhall/gascity/pull/2318>
 
+### Attention Needed
+
+Needs Mabel: yes
+
+Needs D. Box: no
+
+Urgency: yellow
+
+Reason: Mabel should confirm whether #2126 introduces any constraints that
+affect `gc import`, legacy `gc pack fetch/list`, or PackV2 import fields before
+Cleo freezes related registry compatibility behavior.
+
 ### Interface Contracts Other Agents Must Honor
 
 - Do not remove or change `gc import migrate` semantics until doctor /
@@ -347,6 +403,18 @@ First milestone inside the workstream:
 - Tree hash, registry resolution, schema-2 lock metadata, and command-shape
   scaffolding may remain on the workstream branch but should not be treated as
   the first stable checkpoint until registry ops are green.
+
+### Attention Needed
+
+Needs Mabel: yes
+
+Needs D. Box: no
+
+Urgency: yellow
+
+Reason: Mabel should answer Cleo's compatibility ask from the Pack Deprecation
+train; Jasmine should answer JSON schema/failure conventions before Cleo freezes
+registry command schemas/tests.
 
 ### Interface Contracts Other Agents Must Honor
 
@@ -565,6 +633,18 @@ Penelope is continuing the user-facing pack reuse/customization guide and
 design exploration on a separate machine. Do not migrate or interrupt that
 context from this coordination branch.
 
+### Attention Needed
+
+Needs Mabel: no
+
+Needs D. Box: no
+
+Urgency: green
+
+Reason: Penelope is intentionally staying on a separate machine; only update
+this coordination file if her guide decisions affect #2119, #2129, registry/gc
+pack CLI wording, or import/export semantics.
+
 ### Interface Contracts Other Agents Must Honor
 
 - Treat #2129 `[[exports]]` as future design input, not as implemented registry
@@ -584,3 +664,73 @@ context from this coordination branch.
 ### Last Updated
 
 2026-05-18 12:10 PT by Mabel
+
+## Workstream Handoff
+
+### Workstream
+
+gc4gc / Operational Substrate
+
+### Current Branch / PR
+
+Branch: pending Grace handoff
+
+PR: none expected
+
+Base: pending Grace handoff
+
+Owner: Grace
+
+### Latest State
+
+Grace has been asked to publish a gc4gc handoff into this coordination file.
+No Grace-authored coordination update is present yet.
+
+Expected scope:
+
+- Stable gc4gc consumer worktree and branch.
+- Producer/dev worktree and branch.
+- Producer/consumer split status.
+- Stable run artifact contract.
+- New-machine bootstrap and validation commands.
+- Product issues discovered while using Gas City from Codex.
+
+### Interface Contracts Other Agents Must Honor
+
+- Codex remains the human-facing cockpit.
+- Gas City/gc4gc is the backend execution substrate.
+- Stable consumer worktree remains the only consumer-facing runtime unless
+  explicitly promoted.
+- Do not make gc4gc a second cockpit.
+- Do not change JSON or registry implementation from this lane unless Jasmine
+  or Cleo asks.
+
+### Attention Needed
+
+Needs Mabel: yes
+
+Needs D. Box: no
+
+Urgency: yellow
+
+Reason: Grace has not yet published the gc4gc / Operational Substrate handoff
+or new-machine bootstrap into this coordination file.
+
+### Blockers / Cross-Workstream Risks
+
+- `yellow`: gc4gc may need to validate against Jasmine's JSON rollup once that
+  branch is assembled.
+- `yellow`: gc4gc may surface product friction for Cleo's registry/gc pack work
+  but should not directly alter implementation branches.
+
+### Needed From Other Agents
+
+- Grace: publish the gc4gc handoff and bootstrap details.
+- Jasmine: notify Grace when `codex/json-rollup` is ready for gc4gc smoke
+  testing.
+- Cleo: notify Grace if registry/gc pack work needs dogfood validation through
+  gc4gc.
+
+### Last Updated
+
+2026-05-18 12:58 PT by Mabel
