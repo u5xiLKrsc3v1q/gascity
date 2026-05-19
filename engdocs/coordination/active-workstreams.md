@@ -1,6 +1,6 @@
 # Active Workstream Coordination
 
-Last updated: 2026-05-18 22:15 PT by Mabel
+Last updated: 2026-05-18 22:22 PT by Mabel
 
 This is a temporary cross-agent coordination channel, not product documentation.
 Do not merge this file into public docs unless we explicitly promote it.
@@ -185,18 +185,21 @@ Current JSON source of truth is this workstream section plus
 
 ### PRs In Play
 
-- #2349, <https://github.com/gastownhall/gascity/pull/2349>: active JSON
-  rollup PR, open, labeled `status/reviewing`.
-- Feeder PRs #2222, #2250, #2256, #2257, #2258, #2259, #2265, #2266, #2267,
-  #2270, #2271, #2273, #2274, #2287, #2288, #2291, and #2317: superseded by
-  #2349, removed from `status/reviewing`, left open only as provenance until
-  #2349 lands.
+| PR | URL | Branch | Status | Role | Next owner |
+|---|---|---|---|---|---|
+| #2349 | <https://github.com/gastownhall/gascity/pull/2349> | `codex/json-rollup` | open, `status/reviewing`, required CI green | active rollup PR | Mabel tracks review/merge |
+| #2222, #2250, #2256, #2257, #2258, #2259, #2265, #2266, #2267, #2270, #2271, #2273, #2274, #2287, #2288, #2291, #2317 | individual PR URLs | individual feeder branches | open, removed from `status/reviewing` | superseded/provenance-only | Mabel closes after #2349 merges |
 
 ### Immediate Next Step
 
-Track #2349 through review/merge. Do not close feeder PRs until #2349 merges.
+- Mabel tracks #2349 through review/merge.
+- Mabel does not close feeder PRs until #2349 merges.
+- If #2349 gets a branch-related failure, Mabel remediates or asks Jasmine for
+  original rollout context.
 
-### Victory Checklist
+### Complete Victory Checklist
+
+Required for victory:
 
 - #2349 remains required-CI green and merges.
 - Superseded feeder PRs are closed/abandoned with a short pointer to #2349.
@@ -206,6 +209,10 @@ Track #2349 through review/merge. Do not close feeder PRs until #2349 merges.
 - Any remaining command gaps become ordinary follow-up issues, not blockers for
   the rollout train.
 
+Nice follow-up:
+
+- Use gc4gc JSON audit lanes for broader command coverage after the train lands.
+
 ### Explicit Non-Goals / Deferred Work
 
 - Do not revive individual JSON feeder PRs unless #2349 fails and we explicitly
@@ -213,6 +220,14 @@ Track #2349 through review/merge. Do not close feeder PRs until #2349 merges.
 - Do not introduce `--format json`.
 - Do not require every command to support structured failure JSON before this
   train lands; failure JSON is staged command-by-command.
+
+### Open Decisions / Blockers
+
+- Review/merge-pipeline state is the remaining blocker for #2349.
+- One non-required Container Scan image-vulnerability check is failing; treat it
+  as baseline/security signal unless Julian's merge pipeline marks it blocking.
+- No Donna, Chris, Jasmine, Cleo, Grace, or Penelope decision is currently
+  required for JSON.
 
 Included provenance PRs already incorporated into `codex/json-rollup`:
 
@@ -354,7 +369,7 @@ Local-only JSON work state:
 
 ### Last Updated
 
-2026-05-18 22:05 PT by Mabel
+2026-05-18 22:22 PT by Mabel
 
 ### New Machine Bootstrap
 
@@ -449,18 +464,21 @@ locally with docsync plus focused config/logutil/cmd tests.
 
 ### PRs In Play
 
-- #2126, <https://github.com/gastownhall/gascity/pull/2126>: active
-  PackV1/PackV2 deprecation enforcement PR.
-- #2318, <https://github.com/gastownhall/gascity/pull/2318>: related
-  docs/source reconciliation PR; separate from #2126 because it fixes source of
-  truth and public-doc placement rather than runtime behavior.
+| PR | URL | Branch | Status | Role | Next owner |
+|---|---|---|---|---|---|
+| #2126 | <https://github.com/gastownhall/gascity/pull/2126> | `codex/packv2-wave2-goodbye-packv1` | open, `status/reviewing` | active PackV1/PackV2 deprecation enforcement | Mabel tracks review/merge |
+| #2318 | <https://github.com/gastownhall/gascity/pull/2318> | `codex/packv2-doc-source-reconcile` | open, `status/reviewing` | related docs/source reconciliation, not behavior | Mabel tracks separately |
 
 ### Immediate Next Step
 
-Track #2126 through review/merge. Keep #2318 moving independently as the docs
-source-of-truth cleanup.
+- Mabel tracks #2126 through review/merge.
+- Mabel keeps #2318 moving independently as the docs source-of-truth cleanup.
+- If #2126 changes compatibility messaging, Mabel flags Cleo before #2351 exits
+  draft.
 
-### Victory Checklist
+### Complete Victory Checklist
+
+Required for victory:
 
 - #2126 merges with the agreed hard-error/warning/remediation behavior.
 - Legacy pre-PackV2 constructs are no longer normalized as current authoring
@@ -470,12 +488,25 @@ source-of-truth cleanup.
   parity exists for the existing migrate corpus.
 - Any deferred doctor/remediation parity gaps are tracked explicitly.
 
+Nice follow-up:
+
+- Broader example-suite sweeps can wait for registry/gc pack stabilization if
+  already tracked.
+
 ### Explicit Non-Goals / Deferred Work
 
 - Do not fold registry/gc pack implementation into #2126.
 - Do not make #2126 implement the registry surface, JSON rollout, or explicit
   `[[exports]]`.
 - Do not remove `gc import migrate` in this train.
+
+### Open Decisions / Blockers
+
+- Review/merge-pipeline state is the remaining known blocker for #2126.
+- No new Donna decision is needed unless reviewers ask to soften or defer
+  agreed deprecations.
+- Cleo only needs notice if #2126 changes `gc import`, legacy `gc pack
+  fetch/list`, or current PackV2 import field semantics.
 
 ### Attention Needed
 
@@ -520,7 +551,7 @@ registry/gc pack beyond the compatibility invariants listed below.
 
 ### Last Updated
 
-2026-05-18 20:22 PT by Mabel
+2026-05-18 22:22 PT by Mabel
 
 ## Workstream Handoff
 
@@ -547,14 +578,19 @@ guidance.
 
 ### PRs In Play
 
-- #2318: open, non-draft, labeled `status/reviewing`, currently the source of
-  truth for PackV2 docs/source reconciliation.
+| PR | URL | Branch | Status | Role | Next owner |
+|---|---|---|---|---|---|
+| #2318 | <https://github.com/gastownhall/gascity/pull/2318> | `codex/packv2-doc-source-reconcile` | open, non-draft, `status/reviewing`; Chris requested | active docs/source reconciliation | Mabel tracks review/merge |
 
 ### Immediate Next Step
 
-Track #2318 through review/merge. Keep it separate from #2126 and #2349.
+- Mabel tracks #2318 through review/merge.
+- Chris reviews public-doc clarity if he has capacity.
+- Mabel keeps #2318 separate from #2126, #2349, and #2351.
 
-### Victory Checklist
+### Complete Victory Checklist
+
+Required for victory:
 
 - #2318 merges.
 - Public docs no longer expose stale PackV2 design/rollout notes as current
@@ -565,6 +601,11 @@ Track #2318 through review/merge. Keep it separate from #2126 and #2349.
   current public docs or engineering docs intentionally.
 - Docsync and focused config/logutil/cmd validation remain green.
 
+Nice follow-up:
+
+- Revisit public tutorial/guide prose after Penelope's reuse/customization guide
+  settles.
+
 ### Explicit Non-Goals / Deferred Work
 
 - #2318 does not implement deprecation enforcement; that is #2126.
@@ -572,6 +613,14 @@ Track #2318 through review/merge. Keep it separate from #2126 and #2349.
 - #2318 does not implement registry/gc pack; that is #2351.
 - #2318 does not implement explicit `[[exports]]`; #2129 is landed design for
   future implementation.
+
+### Open Decisions / Blockers
+
+- Review/merge-pipeline state is the known blocker for #2318.
+- Chris is requested on #2318 for docs clarity; Julian may still be needed for
+  repository merge policy.
+- No Cleo/Jasmine/Grace/Penelope action is required unless their docs start
+  linking to the moved PackV2 engineering notes as user-facing guidance.
 
 ### Cross-Workstream Dependencies
 
@@ -582,7 +631,7 @@ Track #2318 through review/merge. Keep it separate from #2126 and #2349.
 
 ### Last Updated
 
-2026-05-18 22:15 PT by Mabel
+2026-05-18 22:22 PT by Mabel
 
 ## Workstream Handoff
 
@@ -634,21 +683,24 @@ The registry/gc pack source of truth is now
 
 ### PRs In Play
 
-- #2351, <https://github.com/gastownhall/gascity/pull/2351>: draft registry/gc
-  pack implementation PR and current source of truth.
-- #2119, <https://github.com/gastownhall/gascity/pull/2119>: closed as
-  superseded by #2351.
-- #2129, <https://github.com/gastownhall/gascity/pull/2129>: merged explicit
-  `[[exports]]` design note; related design input, not implemented by #2351.
-- #2318, <https://github.com/gastownhall/gascity/pull/2318>: related PackV2
-  docs/source reconciliation PR.
+| PR | URL | Branch | Status | Role | Next owner |
+|---|---|---|---|---|---|
+| #2351 | <https://github.com/gastownhall/gascity/pull/2351> | `codex/pack-registry-workstream` | open draft, not queued | active registry/gc pack source of truth | Mabel decides when to queue; Cleo owns implementation |
+| #2119 | <https://github.com/gastownhall/gascity/pull/2119> | `codex/gc-pack-cli-design` | closed, superseded, labels removed | old design PR, cleanup-only provenance | no next move |
+| #2129 | <https://github.com/gastownhall/gascity/pull/2129> | `codex/packv2-import-export-redesign-note` | merged | landed explicit `[[exports]]` design input | future implementation owner TBD |
+| #2318 | <https://github.com/gastownhall/gascity/pull/2318> | `codex/packv2-doc-source-reconcile` | open, `status/reviewing` | related docs/source reconciliation | Mabel tracks separately |
 
 ### Immediate Next Step
 
-Decide when to move #2351 from draft/review-train staging into active review.
-Until then, keep it visible but unqueued.
+- Mabel and D. Box decide when to move #2351 from draft/review-train staging
+  into active review.
+- Cleo keeps #2351 stable unless coordinating a product-surface change.
+- Before #2351 exits draft, Mabel refreshes JSON compatibility against #2349
+  and deprecation compatibility against #2126.
 
-### Victory Checklist
+### Complete Victory Checklist
+
+Required for victory:
 
 - #2351 is converted out of draft when the review queue is ready.
 - #2351 CI and review are green, then #2351 merges.
@@ -663,6 +715,11 @@ Until then, keep it visible but unqueued.
 - A follow-up issue exists for explicit `[[exports]]` implementation from
   #2129.
 
+Nice follow-up:
+
+- Dogfood registry/gc pack through gc4gc after #2351 exits draft, if Grace's
+  stable lanes make that cheap.
+
 ### Explicit Non-Goals / Deferred Work
 
 - #2351 does not implement #2129 explicit `[[exports]]`.
@@ -672,6 +729,15 @@ Until then, keep it visible but unqueued.
   `[packs]` status command.
 - Do not fold PackV2 deprecation enforcement into #2351 except for explicit
   compatibility checkpoints.
+
+### Open Decisions / Blockers
+
+- Sequencing decision: when to move #2351 from draft into active review.
+- Review capacity is the practical blocker; #2349 and #2318 are already active.
+- Future explicit `[[exports]]` implementation needs an issue/owner before the
+  registry/gc pack workstream is called fully closed.
+- Coordinate with Jasmine/Mabel if #2349 changes JSON/failure-schema
+  conventions before #2351 exits draft.
 
 Mabel refreshed live state on 2026-05-18 PT:
 
@@ -862,7 +928,7 @@ Additional required gates:
 
 ### Last Updated
 
-2026-05-18 22:18 PT by Mabel
+2026-05-18 22:22 PT by Mabel
 
 ## New Machine Bootstrap
 
@@ -991,19 +1057,24 @@ pack CLI wording, or import/export semantics.
 
 ### PRs In Play
 
-- #2129: merged explicit `[[exports]]` design note and current source for that
-  future direction.
-- #2351: current registry/gc pack implementation PR; related but does not
-  implement explicit `[[exports]]`.
-- Future PR needed for user-facing pack reuse/customization guide and any
-  explicit `[[exports]]` implementation.
+| PR | URL | Branch | Status | Role | Next owner |
+|---|---|---|---|---|---|
+| #2129 | <https://github.com/gastownhall/gascity/pull/2129> | `codex/packv2-import-export-redesign-note` | merged | landed explicit `[[exports]]` design | future implementation owner TBD |
+| #2351 | <https://github.com/gastownhall/gascity/pull/2351> | `codex/pack-registry-workstream` | open draft | related registry/gc pack implementation; does not implement `[[exports]]` | Cleo/Mabel |
+| Future guide PR | TBD | TBD | not opened | user-facing pack reuse/customization guide | Penelope |
+| Future `[[exports]]` implementation PR | TBD | TBD | not opened | implementation of #2129 design | owner TBD |
 
 ### Immediate Next Step
 
-Penelope continues the guide/design work on the separate machine and surfaces
-any decisions that change #2351 wording or future import/export semantics.
+- Penelope continues guide/design work on the separate machine.
+- Penelope surfaces decisions that change #2351 wording or future import/export
+  semantics.
+- Mabel opens or identifies the future `[[exports]]` implementation issue
+  before declaring the registry/reuse workstream fully closed.
 
-### Victory Checklist
+### Complete Victory Checklist
+
+Required for victory:
 
 - User-facing pack reuse/customization guide exists and is aligned with shipped
   behavior.
@@ -1012,11 +1083,23 @@ any decisions that change #2351 wording or future import/export semantics.
 - Any terminology changes are reflected in registry/gc pack docs before #2351
   exits draft.
 
+Nice follow-up:
+
+- Turn mature guide examples into tutorial fixtures after registry/gc pack
+  lands.
+
 ### Explicit Non-Goals / Deferred Work
 
 - Do not implement explicit `[[exports]]` in #2351.
 - Do not make Penelope's guide block #2349, #2318, or #2351 unless it exposes a
   real product contract mismatch.
+
+### Open Decisions / Blockers
+
+- Open decision: who owns explicit `[[exports]]` implementation after #2129.
+- Open decision: where the user-facing guide PR will live and when it should
+  enter review.
+- Penelope is intentionally on another machine; no machine-move blocker here.
 
 ### Interface Contracts Other Agents Must Honor
 
@@ -1036,7 +1119,7 @@ any decisions that change #2351 wording or future import/export semantics.
 
 ### Last Updated
 
-2026-05-18 22:15 PT by Mabel
+2026-05-18 22:22 PT by Mabel
 
 ## Workstream Handoff
 
@@ -1145,18 +1228,24 @@ Known unpromoted work:
 
 ### PRs In Play
 
-- No product PR expected for stable gc4gc itself.
-- `donbox/gc4gc:master` is the stable consumer source.
-- `donbox/gc4gc:codex/gc4gc-producer-dev` is the producer/dev source.
-- `donbox/gc4gc:codex/gc4gc-producer-snapshot-20260518` is archaeology only.
+| Artifact | URL / branch | Status | Role | Next owner |
+|---|---|---|---|---|
+| Stable gc4gc | `https://github.com/donbox/gc4gc`, branch `master` | portable, stable consumer | current consumer surface | Mabel consumes; Grace maintains |
+| Producer/dev gc4gc | `https://github.com/donbox/gc4gc`, branch `codex/gc4gc-producer-dev` | portable, dev only | future Grace-side producer work | Grace |
+| Producer snapshot | `https://github.com/donbox/gc4gc`, branch `codex/gc4gc-producer-snapshot-20260518` | archival | archaeology only | no active owner |
+| Runtime dependency | `https://github.com/gastownhall/gascity`, branch `codex/gc4gc-agent-runtime-dolt-leak` | portable runtime | patched gc for stable gc4gc | Mabel/Grace verify on new machine |
 
 ### Immediate Next Step
 
-Use stable gc4gc only when it helps current review/audit work. Do not promote
-producer/dev features without a canary, validation, and consumer-side
-verification.
+- Mabel uses stable gc4gc only when it helps current review/audit work.
+- Grace keeps producer/dev changes additive and unpromoted until canary,
+  validation, and consumer-side verification are complete.
+- On the new machine, Mabel verifies the dry-run `gc sling --json` check from
+  the stable gc4gc checkout.
 
-### Victory Checklist
+### Complete Victory Checklist
+
+Required for victory:
 
 - New machine can clone stable gc4gc and the patched Gas City runtime.
 - Stable `gc-json.sh sling --json --dry-run --no-convoy --stdin
@@ -1166,11 +1255,22 @@ verification.
   producer/consumer process.
 - Product gaps discovered through gc4gc are filed or tied to existing issues.
 
+Nice follow-up:
+
+- Promote `pack-design-drift-check` after a fresh validation/promotion pass.
+
 ### Explicit Non-Goals / Deferred Work
 
 - Do not make gc4gc a second cockpit or human-facing replacement for Codex.
 - Do not rely on `.gc/` or `.runtime/` as durable migrated Git state.
 - Do not promote formula-driven JSON audit fanout until canaries make it boring.
+
+### Open Decisions / Blockers
+
+- No blocker for machine move; stable gc4gc is portable.
+- Open decision: when, if ever, to promote `pack-design-drift-check`.
+- Open decision: which product gaps discovered through gc4gc should enter the
+  post-pack workstream versus the later V3/orchestration work.
 
 ### Interface Contracts Other Agents Must Honor
 
