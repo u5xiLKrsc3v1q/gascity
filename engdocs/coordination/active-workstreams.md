@@ -1,6 +1,6 @@
 # Active Workstream Coordination
 
-Last updated: 2026-05-19 UTC by Cleo after #2351 CI-green checkpoint
+Last updated: 2026-05-19 UTC by Mabel after #2318 upmerge and #2222 dequeue
 
 This is a temporary cross-agent coordination channel, not product documentation.
 Do not merge this file into public docs unless we explicitly promote it.
@@ -41,7 +41,9 @@ needed owner in `Reason`.
 - `green`: JSON rollup is final machine-move ready at
   `gastownhall/gascity:codex/json-rollup` commit `82a6253d`; PR #2349 is open
   and labeled `status/reviewing`. Mabel has taken over mega wrap-up from
-  Jasmine.
+  Jasmine. The only red check is Container Scan image vulnerabilities in the
+  `gc-mcp-mail` Debian base image; required CI is green and this is repo image
+  hygiene, not JSON behavior fallout.
 - `green`: Registry-gc-pack has Mabel's #2126 compatibility answer. #2126 does
   not add new registry-specific constraints beyond preserving `gc import
   migrate` until doctor parity, preserving legacy `gc pack fetch/list`, keeping
@@ -96,8 +98,9 @@ Remaining move-readiness asks:
 
 - Mabel: monitor PR #2349 review/merge pipeline state. Required CI is green;
   a non-required Container Scan image-vulnerability check is currently failing
-  and should be treated as repo/baseline security signal unless Julian's merge
-  pipeline marks it blocking.
+  on `gc-mcp-mail` Debian packages (`libcap2`, `libsystemd0`, `libudev1`) and
+  should be fixed as repo image hygiene, preferably outside the JSON rollup
+  unless the merge pipeline requires otherwise.
 - Grace: no blocking ask; gc4gc is portable.
 - Penelope: intentionally separate on another machine.
 
@@ -171,13 +174,15 @@ instead of many small PRs.
 `codex/json-rollup` is pushed through commit `82a6253d` (`feat: add json
 output for session order actions`) and is final machine-move ready. PR #2349 is
 open and labeled `status/reviewing`. Live GitHub state refreshed by Mabel on
-2026-05-18 PT shows required CI green, no outstanding requested reviewers, and
+2026-05-19 PT shows required CI green, no outstanding requested reviewers, and
 merge state still blocked by review/merge-pipeline state rather than known
 branch test failures. One non-required Container Scan image-vulnerability check
-is failing.
+is failing on `gc-mcp-mail` Debian package CVEs (`libcap2`, `libsystemd0`,
+`libudev1`).
 
 Mabel dequeued the individual JSON feeder PRs on 2026-05-18 PT by removing
 `status/reviewing` and prepending a superseded-by-#2349 banner to each PR body.
+On 2026-05-19 PT, Mabel also removed the lingering review request from #2222.
 They remain open as provenance until #2349 lands.
 
 Current JSON source of truth is this workstream section plus
@@ -188,7 +193,7 @@ Current JSON source of truth is this workstream section plus
 | PR | URL | Branch | Status | Role | Next owner |
 |---|---|---|---|---|---|
 | #2349 | <https://github.com/gastownhall/gascity/pull/2349> | `codex/json-rollup` | open, `status/reviewing`, required CI green | active rollup PR | Mabel tracks review/merge |
-| #2222, #2250, #2256, #2257, #2258, #2259, #2265, #2266, #2267, #2270, #2271, #2273, #2274, #2287, #2288, #2291, #2317 | individual PR URLs | individual feeder branches | open, removed from `status/reviewing` | superseded/provenance-only | Mabel closes after #2349 merges |
+| JSON feeder PRs | individual PR URLs | individual feeder branches | open, removed from `status/reviewing` and review requests | superseded/provenance-only; omit from routine wherearewe unless auditing feeders | Mabel closes after #2349 merges |
 
 ### Immediate Next Step
 
@@ -224,8 +229,9 @@ Nice follow-up:
 ### Open Decisions / Blockers
 
 - Review/merge-pipeline state is the remaining blocker for #2349.
-- One non-required Container Scan image-vulnerability check is failing; treat it
-  as baseline/security signal unless Julian's merge pipeline marks it blocking.
+- One non-required Container Scan image-vulnerability check is failing on the
+  `gc-mcp-mail` image. The failure is real base-image package exposure, not a
+  JSON code failure; fix it as image hygiene, preferably in a small separate PR.
 - No Donna, Chris, Jasmine, Cleo, Grace, or Penelope decision is currently
   required for JSON.
 
@@ -457,7 +463,7 @@ Related docs/source reconciliation:
 
 - #2318, <https://github.com/gastownhall/gascity/pull/2318>
 
-#2318 has been upmerged with `main` and pushed at `37202b2f`. It now removes
+#2318 has been upmerged with `main` and pushed at `fae60f95`. It now removes
 the moved PackV2 migration page from public docs navigation, points
 engineering/historical references at `engdocs/design/packv2`, and validates
 locally with docsync plus focused config/logutil/cmd tests.
@@ -582,7 +588,13 @@ Mabel reproduced the branch failure locally:
 `docs/packv2`. Mabel patched the test to scan `engdocs/design/packv2`
 including `.md` and `.mdx`, verified the focused config tests plus docsync
 locally, and pushed commit `4f5c7b16` (`test: follow moved PackV2 design
-docs`). GitHub CI is rerunning for #2318.
+docs`).
+
+On 2026-05-19 PT, Mabel upmerged #2318 with current `origin/main` and pushed
+`fae60f95` (`Merge remote-tracking branch 'origin/main' into
+codex/packv2-doc-source-reconcile`). Local validation after the upmerge:
+focused config tests for the moved docs path, `make check-docs`, and
+`git diff --check`. GitHub CI is rerunning for #2318.
 
 ### PRs In Play
 
@@ -592,7 +604,7 @@ docs`). GitHub CI is rerunning for #2318.
 
 ### Immediate Next Step
 
-- Mabel tracks #2318 CI after `4f5c7b16`, then review/merge.
+- Mabel tracks #2318 CI after `fae60f95`, then review/merge.
 - Chris reviews public-doc clarity if he has capacity.
 - Mabel keeps #2318 separate from #2126, #2349, and #2351.
 
