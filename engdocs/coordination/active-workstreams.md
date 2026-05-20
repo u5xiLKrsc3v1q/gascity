@@ -1,6 +1,6 @@
 # Active Workstream Coordination
 
-Last updated: 2026-05-19 UTC by Cleo after #2351 dependency-command wave
+Last updated: 2026-05-20 UTC by Mabel after #2349 container-scan fix push
 
 This is a temporary cross-agent coordination channel, not product documentation.
 Do not merge this file into public docs unless we explicitly promote it.
@@ -39,11 +39,11 @@ needed owner in `Reason`.
 ## Current Attention Summary
 
 - `green`: JSON rollup is final machine-move ready at
-  `gastownhall/gascity:codex/json-rollup` commit `82a6253d`; PR #2349 is open
+  `gastownhall/gascity:codex/json-rollup` commit `f8e7a170`; PR #2349 is open
   and labeled `status/reviewing`. Mabel has taken over mega wrap-up from
-  Jasmine. The only red check is Container Scan image vulnerabilities in the
-  `gc-mcp-mail` Debian base image; required CI is green and this is repo image
-  hygiene, not JSON behavior fallout.
+  Jasmine. Mabel patched the `gc-mcp-mail` Container Scan failure on this
+  branch by upgrading vulnerable Debian base-image packages; GitHub CI is
+  rerunning from `f8e7a170`.
 - `green`: Registry-gc-pack has Mabel's #2126 compatibility answer. #2126 does
   not add new registry-specific constraints beyond preserving `gc import
   migrate` until doctor parity, preserving legacy `gc pack fetch/list`, keeping
@@ -96,11 +96,8 @@ Known portable workstreams:
 
 Remaining move-readiness asks:
 
-- Mabel: monitor PR #2349 review/merge pipeline state. Required CI is green;
-  a non-required Container Scan image-vulnerability check is currently failing
-  on `gc-mcp-mail` Debian packages (`libcap2`, `libsystemd0`, `libudev1`) and
-  should be fixed as repo image hygiene, preferably outside the JSON rollup
-  unless the merge pipeline requires otherwise.
+- Mabel: monitor PR #2349 review/merge pipeline state after pushed container
+  scan fix `f8e7a170`.
 - Grace: no blocking ask; gc4gc is portable.
 - Penelope: intentionally separate on another machine.
 
@@ -171,14 +168,15 @@ many-small-PR strategy is replaced by a single JSON rollup / review-train PR
 so Julian can review one coherent `gc --json` / `--json-schema` surface
 instead of many small PRs.
 
-`codex/json-rollup` is pushed through commit `82a6253d` (`feat: add json
-output for session order actions`) and is final machine-move ready. PR #2349 is
+`codex/json-rollup` is pushed through commit `f8e7a170` (`fix: refresh mail
+image vulnerable packages`) and is final machine-move ready. PR #2349 is
 open and labeled `status/reviewing`. Live GitHub state refreshed by Mabel on
 2026-05-19 PT shows required CI green, no outstanding requested reviewers, and
 merge state still blocked by review/merge-pipeline state rather than known
-branch test failures. One non-required Container Scan image-vulnerability check
-is failing on `gc-mcp-mail` Debian package CVEs (`libcap2`, `libsystemd0`,
-`libudev1`).
+branch test failures. On 2026-05-19 PT, Mabel patched the visible Container
+Scan failure by upgrading the vulnerable `gc-mcp-mail` Debian packages
+(`libcap2`, `libsystemd0`, `libudev1`) in `contrib/k8s/Dockerfile.mail` and
+pushed `f8e7a170`; GitHub CI is rerunning.
 
 Mabel dequeued the individual JSON feeder PRs on 2026-05-18 PT by removing
 `status/reviewing` and prepending a superseded-by-#2349 banner to each PR body.
@@ -228,10 +226,11 @@ Nice follow-up:
 
 ### Open Decisions / Blockers
 
-- Review/merge-pipeline state is the remaining blocker for #2349.
-- One non-required Container Scan image-vulnerability check is failing on the
-  `gc-mcp-mail` image. The failure is real base-image package exposure, not a
-  JSON code failure; fix it as image hygiene, preferably in a small separate PR.
+- Review/merge-pipeline state is the remaining blocker for #2349 once the
+  rerun from `f8e7a170` completes.
+- Container Scan failure was real base-image package exposure, not a JSON code
+  failure; Mabel patched it directly on the JSON rollup to avoid another stray
+  PR.
 - No Donna, Chris, Jasmine, Cleo, Grace, or Penelope decision is currently
   required for JSON.
 
@@ -342,7 +341,7 @@ Validation matrix for `codex/json-rollup`:
 
 Local-only JSON work state:
 
-- The rollup branch is pushed at `origin/codex/json-rollup` through `82a6253d`.
+- The rollup branch is pushed at `origin/codex/json-rollup` through `f8e7a170`.
 - No meaningful JSON code changes are local-only.
 - All intended first-rollup feeder branches are either incorporated or
   superseded by #2349.
@@ -399,7 +398,8 @@ Worktrees to create:
 
 Local-only state:
 
-- None for JSON rollup code through pushed commit `82a6253d`.
+- None for JSON rollup code through pushed commit `f8e7a170`; container-scan
+  rerun is pending.
 - No old JSON fan-out worktree is needed to continue the rollout on a new
   machine.
 
@@ -433,7 +433,7 @@ Exact first prompt for Jasmine on a new machine:
 > `origin/codex/workstream-coordination`. Clone/fetch `gastownhall/gascity`,
 > create worktrees for `codex/workstream-coordination` and
 > `codex/json-rollup`, then continue monitoring PR #2349 from pushed commit
-> `82a6253d`. Refresh CI/review state, remediate branch-related failures, and
+> `f8e7a170`. Refresh CI/review state, remediate branch-related failures, and
 > treat the old individual JSON PRs/branches as superseded by #2349 unless
 > explicitly reopened.
 
