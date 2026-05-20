@@ -78,7 +78,7 @@ const (
 )
 
 var builtinProviderOrder = []string{
-	"claude", "codex", "gemini", "kiro", "cursor", "copilot",
+	"claude", "codex", "gemini", "kimi", "kiro", "cursor", "copilot",
 	"amp", "opencode", "auggie", "pi", "omp",
 }
 
@@ -262,6 +262,31 @@ var builtinProviderSpecs = map[string]BuiltinProviderSpec{
 					{Value: "", Label: "Default"},
 					{Value: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", FlagArgs: []string{"--model", "gemini-2.5-pro"}, FlagAliases: [][]string{{"-m", "gemini-2.5-pro"}}},
 					{Value: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", FlagArgs: []string{"--model", "gemini-2.5-flash"}, FlagAliases: [][]string{{"-m", "gemini-2.5-flash"}}},
+				},
+			},
+		},
+	},
+	"kimi": {
+		DisplayName:  "Kimi Code",
+		Command:      "kimi",
+		Args:         []string{"--yolo", "--no-thinking"},
+		PromptMode:   "none",
+		ReadyDelayMs: 5000,
+		ProcessNames: []string{"kimi", "python"},
+		SupportsACP:  true,
+		ResumeFlag:   "--session",
+		ResumeStyle:  "flag",
+		ACPArgs:      []string{"--yolo", "--no-thinking", "acp"},
+		PrintArgs:    []string{"--quiet", "--prompt"},
+		TitleModel:   "kimi-k2.6",
+		OptionsSchema: []BuiltinProviderOption{
+			{
+				Key:   "model",
+				Label: "Model",
+				Type:  "select",
+				Choices: []BuiltinOptionChoice{
+					{Value: "", Label: "Default"},
+					{Value: "kimi-k2.6", Label: "Kimi K2.6", FlagArgs: []string{"--model", "kimi-k2.6"}},
 				},
 			},
 		},

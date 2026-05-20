@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -181,6 +182,65 @@ func TestParseCustomTypesJSON(t *testing.T) {
 				t.Errorf("parseCustomTypesJSON(%q) = %v, want %v", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCustomTypesBdCommandsUseManagedEnvAndSandbox(t *testing.T) {
+	dir := t.TempDir()
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "bd-args.log")
+	bdPath := filepath.Join(binDir, "bd")
+	if err := os.WriteFile(bdPath, []byte(`#!/bin/sh
+set -eu
+[ "${BD_DOLT_AUTO_PUSH:-}" = "false" ] || {
+  echo "BD_DOLT_AUTO_PUSH=${BD_DOLT_AUTO_PUSH:-}" >&2
+  exit 43
+}
+[ "${BD_EXPORT_AUTO:-}" = "false" ] || {
+  echo "BD_EXPORT_AUTO=${BD_EXPORT_AUTO:-}" >&2
+  exit 44
+}
+printf '%s\n' "$*" >> "$BD_ARGS_LOG"
+case "$*" in
+  "--sandbox config get --json types.custom")
+    printf '{"key":"types.custom","value":"custom"}'
+    ;;
+  "--sandbox config set types.custom custom,molecule")
+    ;;
+  *)
+    echo "unexpected args: $*" >&2
+    exit 64
+    ;;
+esac
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BD_ARGS_LOG", logPath)
+	t.Setenv("BD_DOLT_AUTO_PUSH", "true")
+	t.Setenv("BD_EXPORT_AUTO", "true")
+
+	current, err := getCustomTypes(dir)
+	if err != nil {
+		t.Fatalf("getCustomTypes: %v", err)
+	}
+	if !reflect.DeepEqual(current, []string{"custom"}) {
+		t.Fatalf("getCustomTypes = %v, want [custom]", current)
+	}
+	if err := setCustomTypes(dir, "custom,molecule"); err != nil {
+		t.Fatalf("setCustomTypes: %v", err)
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSpace(string(logData)), "\n")
+	want := []string{
+		"--sandbox config get --json types.custom",
+		"--sandbox config set types.custom custom,molecule",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bd args = %v, want %v", got, want)
 	}
 }
 

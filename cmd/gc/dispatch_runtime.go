@@ -660,7 +660,7 @@ func workflowServeControlReadyQuery(agentCfg config.Agent, controlSessionNames .
 		target = config.ControlDispatcherAgentName
 	}
 	limit := fmt.Sprintf("%d", workflowServeScanLimit)
-	queryPrefix := `BD_EXPORT_AUTO=false GC_CONTROL_TARGET=` + shellquote.Quote(target)
+	queryPrefix := `BD_EXPORT_AUTO=false BD_DOLT_AUTO_PUSH=false GC_CONTROL_TARGET=` + shellquote.Quote(target)
 	for _, name := range controlSessionNames {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -673,23 +673,29 @@ func workflowServeControlReadyQuery(agentCfg config.Agent, controlSessionNames .
 		queryPrefix += ` GC_CONTROL_LEGACY_TARGET=` + shellquote.Quote(legacy)
 	}
 	query := queryPrefix + ` sh -c '` +
-		`tmp=$(mktemp); trap "rm -f \"$tmp\"" EXIT; ` +
-		`emit_ready() { r=$("$@" 2>/dev/null || true); [ -n "$r" ] && [ "$r" != "[]" ] && printf "%s\n" "$r" >> "$tmp"; }; ` +
+		`set -e; ` +
+		`tmp=$(mktemp); err=$(mktemp); trap "rm -f \"$tmp\" \"$err\"" EXIT; ` +
+		`gc_bd() { "${GC_BIN:-gc}" bd --city "$GC_CITY_PATH" "$@"; }; ` +
+		`emit_ready() { : > "$err"; set +e; r=$("$@" 2>"$err"); status=$?; set -e; ` +
+		`if [ "$status" -ne 0 ]; then cat "$err" >&2; return 0; fi; ` +
+		`[ -n "$r" ] && [ "$r" != "[]" ] || return 0; ` +
+		`if printf "%s\n" "$r" | jq -e "type == \"array\"" >/dev/null 2>&1; then printf "%s\n" "$r" >> "$tmp"; ` +
+		`else printf "%s\n" "gc convoy control --serve: ignoring malformed ready output from $*: $r" >&2; fi; }; ` +
 		`for id in "$GC_CONTROL_SESSION_NAME" "$GC_SESSION_NAME" "$GC_ALIAS" "$GC_CONTROL_TARGET" "$GC_SESSION_ID"; do ` +
 		`[ -z "$id" ] && continue; ` +
 		`legacy=""; case "$id" in *control-dispatcher) legacy="${id%control-dispatcher}workflow-control";; esac; ` +
 		`for cand in "$id" "$legacy"; do ` +
 		`[ -z "$cand" ] && continue; ` +
-		`emit_ready bd --readonly --sandbox ready --assignee="$cand" --json --limit=` + limit + `; ` +
+		`emit_ready gc_bd --readonly --sandbox ready --assignee="$cand" --include-ephemeral --json --limit=` + limit + `; ` +
 		`done; ` +
 		`done; ` +
-		`emit_ready bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_TARGET" --unassigned --json --limit=` + limit + `; `
+		`emit_ready gc_bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_TARGET" --unassigned --include-ephemeral --json --limit=` + limit + `; `
 	if legacy := workflowServeLegacyControlRoute(target); legacy != "" {
-		query += `emit_ready bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_LEGACY_TARGET" --unassigned --json --limit=` + limit + `; `
+		query += `emit_ready gc_bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_LEGACY_TARGET" --unassigned --include-ephemeral --json --limit=` + limit + `; `
 	} else {
 		query += `:; `
 	}
-	query += `[ -s "$tmp" ] && jq -s "reduce add[] as \$item ([]; if any(.[]; .id == \$item.id) then . else . + [\$item] end)" "$tmp" || printf "[]"` + `'`
+	query += `if [ -s "$tmp" ]; then jq -s "reduce add[] as \$item ([]; if any(.[]; .id == \$item.id) then . else . + [\$item] end)" "$tmp"; else printf "[]"; fi` + `'`
 	return query
 }
 

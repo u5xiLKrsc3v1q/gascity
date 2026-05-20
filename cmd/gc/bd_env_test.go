@@ -2070,6 +2070,9 @@ func TestDoltAutoStartSuppressedInAllEnvPaths(t *testing.T) {
 		if got := env["BEADS_DOLT_AUTO_START"]; got != "0" {
 			t.Errorf("BEADS_DOLT_AUTO_START = %q, want %q", got, "0")
 		}
+		if got := env["BD_DOLT_AUTO_PUSH"]; got != "false" {
+			t.Errorf("BD_DOLT_AUTO_PUSH = %q, want %q", got, "false")
+		}
 	})
 
 	t.Run("bdRuntimeEnvForRig", func(t *testing.T) {
@@ -2081,12 +2084,18 @@ func TestDoltAutoStartSuppressedInAllEnvPaths(t *testing.T) {
 		if got := env["BEADS_DOLT_AUTO_START"]; got != "0" {
 			t.Errorf("BEADS_DOLT_AUTO_START = %q, want %q", got, "0")
 		}
+		if got := env["BD_DOLT_AUTO_PUSH"]; got != "false" {
+			t.Errorf("BD_DOLT_AUTO_PUSH = %q, want %q", got, "false")
+		}
 	})
 
 	t.Run("sessionDoltEnv", func(t *testing.T) {
 		env := sessionDoltEnv(cityPath, "", nil)
 		if got := env["BEADS_DOLT_AUTO_START"]; got != "0" {
 			t.Errorf("BEADS_DOLT_AUTO_START = %q, want %q", got, "0")
+		}
+		if got := env["BD_DOLT_AUTO_PUSH"]; got != "false" {
+			t.Errorf("BD_DOLT_AUTO_PUSH = %q, want %q", got, "false")
 		}
 	})
 }
@@ -3062,5 +3071,8 @@ func TestControlBdCommandRunnerDefaultsBeadsActorToControllerWhenUnset(t *testin
 	}
 	if got := captured["BD_EXPORT_AUTO"]; got != "false" {
 		t.Fatalf("BD_EXPORT_AUTO = %q, want false", got)
+	}
+	if got := captured["BD_DOLT_AUTO_PUSH"]; got != "false" {
+		t.Fatalf("BD_DOLT_AUTO_PUSH = %q, want false", got)
 	}
 }

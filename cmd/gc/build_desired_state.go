@@ -1096,10 +1096,11 @@ func readyForControllerDemand(store beads.Store) ([]beads.Bead, error) {
 		CachedReady() ([]beads.Bead, bool)
 	}); ok {
 		if ready, ok := cached.CachedReady(); ok {
-			return ready, nil
+			return filterControllerDemandBeads(ready), nil
 		}
 	}
-	return beads.ReadyLive(store)
+	ready, err := beads.ReadyLive(store)
+	return filterControllerDemandBeads(ready), err
 }
 
 func readyForControllerDemandQuery(store beads.Store, query beads.ReadyQuery) ([]beads.Bead, error) {
@@ -1110,15 +1111,18 @@ func readyForControllerDemandQuery(store beads.Store, query beads.ReadyQuery) ([
 			return filterReadyForControllerDemand(ready, query), nil
 		}
 	}
-	return store.Ready(query)
+	liveQuery := query
+	liveQuery.Limit = 0
+	ready, err := store.Ready(liveQuery)
+	return filterReadyForControllerDemand(ready, query), err
 }
 
 func filterReadyForControllerDemand(ready []beads.Bead, query beads.ReadyQuery) []beads.Bead {
-	if query == (beads.ReadyQuery{}) {
-		return ready
-	}
 	result := make([]beads.Bead, 0, len(ready))
 	for _, bead := range ready {
+		if isSessionBead(bead) {
+			continue
+		}
 		if query.Assignee != "" && bead.Assignee != query.Assignee {
 			continue
 		}
@@ -1126,6 +1130,20 @@ func filterReadyForControllerDemand(ready []beads.Bead, query beads.ReadyQuery) 
 		if query.Limit > 0 && len(result) >= query.Limit {
 			break
 		}
+	}
+	return result
+}
+
+func filterControllerDemandBeads(ready []beads.Bead) []beads.Bead {
+	if len(ready) == 0 {
+		return ready
+	}
+	result := make([]beads.Bead, 0, len(ready))
+	for _, bead := range ready {
+		if isSessionBead(bead) {
+			continue
+		}
+		result = append(result, bead)
 	}
 	return result
 }
@@ -1181,7 +1199,7 @@ func appendWorkUnique(dst *[]beads.Bead, stores *[]beads.Store, storeRefs *[]str
 	// here because they represent mail that should wake/materialize sessions;
 	// idle nudge filters messages locally since mail nudging is handled
 	// separately by the mail system.
-	if b.Type == sessionBeadType {
+	if isSessionBead(b) {
 		return
 	}
 	if _, ok := seen[b.ID]; ok {

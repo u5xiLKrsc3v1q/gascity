@@ -155,8 +155,7 @@ func mergeCustomTypes(current, required []string) []string {
 // the human-readable "types.custom (not set)" sentinel (which would
 // otherwise be persisted as a fake custom type when Fix() merges).
 func getCustomTypes(dir string) ([]string, error) {
-	cmd := exec.Command("bd", "config", "get", "--json", "types.custom")
-	cmd.Dir = dir
+	cmd := bdConfigCommand(dir, "get", "--json", "types.custom")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -182,9 +181,28 @@ func parseCustomTypesJSON(out []byte) ([]string, error) {
 
 // setCustomTypes writes the types.custom config to a bd store.
 func setCustomTypes(dir, types string) error {
-	cmd := exec.Command("bd", "config", "set", "types.custom", types)
-	cmd.Dir = dir
+	cmd := bdConfigCommand(dir, "set", "types.custom", types)
 	return cmd.Run()
+}
+
+func bdConfigCommand(dir string, args ...string) *exec.Cmd {
+	cmdArgs := append([]string{"--sandbox", "config"}, args...)
+	cmd := exec.Command("bd", cmdArgs...)
+	cmd.Dir = dir
+	cmd.Env = bdConfigCommandEnv(cmd.Environ())
+	return cmd
+}
+
+func bdConfigCommandEnv(base []string) []string {
+	env := make([]string, 0, len(base)+2)
+	for _, entry := range base {
+		if strings.HasPrefix(entry, "BD_DOLT_AUTO_PUSH=") || strings.HasPrefix(entry, "BD_EXPORT_AUTO=") {
+			continue
+		}
+		env = append(env, entry)
+	}
+	env = append(env, "BD_DOLT_AUTO_PUSH=false", "BD_EXPORT_AUTO=false")
+	return env
 }
 
 // dirExists checks if a directory exists.

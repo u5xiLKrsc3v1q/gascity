@@ -412,6 +412,7 @@ func TestCityRuntimeEnsureManagedDoltPublishedForTickLogsOwnershipError(t *testi
 }
 
 func TestCityRuntimeTickPreflightsManagedDoltBeforeSessionSnapshot(t *testing.T) {
+	disableManagedDoltRecoveryForTest(t)
 	t.Setenv("GC_BEADS", "bd")
 
 	orderEvents := &orderedRuntimeEvents{}
@@ -420,8 +421,10 @@ func TestCityRuntimeTickPreflightsManagedDoltBeforeSessionSnapshot(t *testing.T)
 		events: orderEvents,
 	}
 	sp := runtime.NewFake()
+	cityPath := t.TempDir()
+	requireNoLeakedDoltAfterForPaths(t, cityPath)
 	cr := &CityRuntime{
-		cityPath: t.TempDir(),
+		cityPath: cityPath,
 		cityName: "test-city",
 		cfg:      &config.City{},
 		sp:       sp,
@@ -465,6 +468,7 @@ func TestCityRuntimeRunStartupPreflightsManagedDoltBeforeSessionSnapshot(t *test
 	cityPath := t.TempDir()
 	tomlPath := filepath.Join(cityPath, "city.toml")
 	writeCityRuntimeConfig(t, tomlPath, "fake")
+	disableManagedDoltRecoveryForTest(t)
 	t.Setenv("GC_BEADS", "bd")
 
 	cfg, err := config.Load(osFS{}, tomlPath)
@@ -524,6 +528,7 @@ func TestCityRuntimeRunStartupPreflightsManagedDoltBeforeSessionSnapshot(t *test
 }
 
 func TestCityRuntimeControlDispatcherPreflightsManagedDoltBeforeSessionSnapshot(t *testing.T) {
+	disableManagedDoltRecoveryForTest(t)
 	t.Setenv("GC_BEADS", "bd")
 
 	orderEvents := &orderedRuntimeEvents{}
@@ -532,8 +537,10 @@ func TestCityRuntimeControlDispatcherPreflightsManagedDoltBeforeSessionSnapshot(
 		events: orderEvents,
 	}
 	sp := runtime.NewFake()
+	cityPath := t.TempDir()
+	requireNoLeakedDoltAfterForPaths(t, cityPath)
 	cr := &CityRuntime{
-		cityPath: "test-city",
+		cityPath: cityPath,
 		cityName: "test-city",
 		cfg: &config.City{Agents: []config.Agent{
 			{Name: config.ControlDispatcherAgentName},
@@ -570,10 +577,12 @@ func TestCityRuntimeControlDispatcherPreflightsManagedDoltBeforeSessionSnapshot(
 }
 
 func TestNewCityRuntimePreflightsManagedDoltPublicationBeforeStartupStoreWork(t *testing.T) {
+	disableManagedDoltRecoveryForTest(t)
 	t.Setenv("GC_BEADS", "bd")
 
 	healthCalls := 0
 	cityPath := t.TempDir()
+	requireNoLeakedDoltAfterForPaths(t, cityPath)
 	sp := runtime.NewFake()
 	_ = newCityRuntime(CityRuntimeParams{
 		CityPath: cityPath,

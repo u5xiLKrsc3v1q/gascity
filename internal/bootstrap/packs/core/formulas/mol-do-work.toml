@@ -47,25 +47,37 @@ you can identify.
 
 Before closing, inspect the working tree:
 ```bash
-git status --short
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git status --short
+else
+  echo "Not in a git worktree; skip git status and commit."
+fi
 ```
 
-If you changed product/source files, documentation, tests, configs, or other
-repo-owned artifacts for the task, commit those changes before closing the bead:
+If you are in a git worktree and changed product/source files, documentation,
+tests, configs, or other repo-owned artifacts for the task, commit those
+changes before closing the bead:
 ```bash
-git add <files>
-git commit -m "<type>: <description>"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git add <files>
+  git commit -m "<type>: <description>"
+fi
 ```
 
 Do not commit unrelated runtime metadata, local agent directories, caches, or
 bead database churn unless the bead explicitly required those files. If the
-only remaining dirty files are unrelated runtime/bead metadata, leave them
-uncommitted and mention that in your close notes.
+only remaining dirty files are unrelated runtime/bead metadata, or the
+assignment is running outside a git worktree, leave them uncommitted and mention
+that in your close notes.
 
 **3. Close the target bead when done:**
 ```bash
-COMMIT=$(git rev-parse --short HEAD 2>/dev/null || true)
-bd update {{issue}} --set-metadata gc.outcome=pass --status=closed --notes "Done: <brief summary of what you did>. Verification: <commands run>. Commit: ${COMMIT:-none}."
+COMMIT=none
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  COMMIT=$(git rev-parse --short HEAD 2>/dev/null || printf 'none')
+fi
+bd update {{issue}} --set-metadata gc.outcome=pass
+bd close {{issue}} --reason "Done: <brief summary of what you did>. Verification: <commands run>. Commit: ${COMMIT}."
 ```
 
 **4. Close this formula step:**
@@ -75,7 +87,8 @@ prevents `mol-do-work` wrapper beads from remaining ready after the real work
 is complete.
 ```bash
 if [ -n "${GC_BEAD_ID:-}" ] && [ "$GC_BEAD_ID" != "{{issue}}" ]; then
-  bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass --status=closed --notes "Target {{issue}} completed. Commit: ${COMMIT:-none}."
+  bd update "$GC_BEAD_ID" --set-metadata gc.outcome=pass
+  bd close "$GC_BEAD_ID" --reason "Target {{issue}} completed. Commit: ${COMMIT}."
 fi
 ```
 
@@ -85,7 +98,7 @@ gc mail inbox
 ```
 
 **Exit criteria:** The work described in the bead is complete, relevant changes
-are committed, the target bead is closed, and the claimed formula step is
+are committed when the assignment runs inside a git worktree, the target bead is closed, and the claimed formula step is
 closed when `GC_BEAD_ID` is available."""
 
 [[steps]]

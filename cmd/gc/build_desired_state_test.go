@@ -384,6 +384,91 @@ func TestDefaultScaleCheckCountsUsesCachedReadyReadModel(t *testing.T) {
 	}
 }
 
+func TestDefaultScaleCheckCountsIgnoresSessionBeadsInReadySet(t *testing.T) {
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{
+		Title:  "queued routed work",
+		Type:   "task",
+		Status: "open",
+		Metadata: map[string]string{
+			"gc.routed_to": "gascity/workflows.codex-min",
+		},
+	}); err != nil {
+		t.Fatalf("create routed bead: %v", err)
+	}
+	if _, err := store.Create(beads.Bead{
+		Title:  "pool session bead",
+		Type:   sessionBeadType,
+		Status: "open",
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"gc.routed_to": "gascity/workflows.codex-min",
+			"session_name": "workflows__codex-min-ga-session",
+		},
+	}); err != nil {
+		t.Fatalf("create typed session bead: %v", err)
+	}
+	if _, err := store.Create(beads.Bead{
+		Title:  "label-only session bead",
+		Type:   "task",
+		Status: "open",
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"gc.routed_to": "gascity/workflows.codex-min",
+			"session_name": "workflows__codex-min-ga-label-session",
+		},
+	}); err != nil {
+		t.Fatalf("create label-only session bead: %v", err)
+	}
+
+	counts, _, errs := defaultScaleCheckCounts([]defaultScaleCheckTarget{{
+		template: "gascity/workflows.codex-min",
+		storeKey: "rig:gascity",
+		store:    store,
+	}})
+	if len(errs) != 0 {
+		t.Fatalf("defaultScaleCheckCounts errs = %v", errs)
+	}
+	if got := counts["gascity/workflows.codex-min"]; got != 1 {
+		t.Fatalf("defaultScaleCheckCounts = %d, want only real work counted", got)
+	}
+}
+
+func TestReadyForControllerDemandQueryAppliesLimitAfterSessionFiltering(t *testing.T) {
+	store := beads.NewMemStore()
+	const limit = 2
+	for i := 0; i < limit; i++ {
+		if _, err := store.Create(beads.Bead{
+			Title:  fmt.Sprintf("label-only pool session bead %d", i),
+			Type:   "task",
+			Status: "open",
+			Labels: []string{sessionBeadLabel},
+			Metadata: map[string]string{
+				"session_name": fmt.Sprintf("workflows__codex-min-ga-session-%d", i),
+			},
+		}); err != nil {
+			t.Fatalf("create session bead %d: %v", i, err)
+		}
+	}
+	work, err := store.Create(beads.Bead{
+		Title:    "assigned work hidden behind session beads",
+		Type:     "task",
+		Status:   "open",
+		Assignee: "gascity/workflows.codex-min",
+	})
+	if err != nil {
+		t.Fatalf("create assigned work: %v", err)
+	}
+
+	got, err := readyForControllerDemandQuery(store, beads.ReadyQuery{Limit: limit})
+	if err != nil {
+		t.Fatalf("readyForControllerDemandQuery: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != work.ID {
+		t.Fatalf("readyForControllerDemandQuery = %#v, want only %s", got, work.ID)
+	}
+}
+
 func TestDefaultScaleCheckCountsIgnoresOpenMoleculeContainers(t *testing.T) {
 	backing := &demandListCountingStore{Store: beads.NewMemStore()}
 	if _, err := backing.Create(beads.Bead{
@@ -592,6 +677,57 @@ func TestDefaultNamedSessionDemandUsesPartialReadyRows(t *testing.T) {
 	}
 	if !partialTemplates["worker"] {
 		t.Fatalf("partialTemplates = %v, want worker marked partial", partialTemplates)
+	}
+}
+
+func TestDefaultNamedSessionDemandIgnoresSessionBeadsInReadySet(t *testing.T) {
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{
+		Title:  "named session bead",
+		Type:   sessionBeadType,
+		Status: "open",
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"gc.routed_to": "worker",
+			"session_name": "test-city__primary",
+		},
+	}); err != nil {
+		t.Fatalf("create typed session bead: %v", err)
+	}
+	if _, err := store.Create(beads.Bead{
+		Title:  "label-only named session bead",
+		Type:   "task",
+		Status: "open",
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"gc.routed_to": "worker",
+			"session_name": "test-city__primary",
+		},
+	}); err != nil {
+		t.Fatalf("create label-only session bead: %v", err)
+	}
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Agents: []config.Agent{{
+			Name: "worker",
+		}},
+		NamedSessions: []config.NamedSession{{
+			Name:     "primary",
+			Template: "worker",
+			Mode:     "on_demand",
+		}},
+	}
+
+	demand, _, errs := defaultNamedSessionDemand([]defaultScaleCheckTarget{{
+		template: "worker",
+		storeKey: "rig:gascity",
+		store:    store,
+	}}, cfg, "test-city")
+	if len(errs) != 0 {
+		t.Fatalf("defaultNamedSessionDemand errs = %v", errs)
+	}
+	if demand["primary"] {
+		t.Fatalf("defaultNamedSessionDemand[primary] = true, want session beads ignored")
 	}
 }
 

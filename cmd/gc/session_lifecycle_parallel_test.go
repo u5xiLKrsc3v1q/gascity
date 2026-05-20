@@ -72,6 +72,25 @@ func (s *panicMetadataBatchStore) SetMetadataBatch(string, map[string]string) er
 	panic("metadata batch panic")
 }
 
+func TestStartCandidatePriorityRanksExplicitWakesBeforeRoutineStarts(t *testing.T) {
+	tests := []struct {
+		name        string
+		reason      WakeReason
+		maxLessThan int
+	}{
+		{name: "pin outranks work", reason: WakePin, maxLessThan: startCandidatePriority(startCandidate{wakeReasons: []WakeReason{WakeWork}})},
+		{name: "attached outranks create", reason: WakeAttached, maxLessThan: startCandidatePriority(startCandidate{wakeReasons: []WakeReason{WakeCreate}})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := startCandidatePriority(startCandidate{wakeReasons: []WakeReason{tt.reason}})
+			if got >= tt.maxLessThan {
+				t.Fatalf("startCandidatePriority(%s) = %d, want less than %d", tt.reason, got, tt.maxLessThan)
+			}
+		})
+	}
+}
+
 type getErrorStore struct {
 	*beads.MemStore
 }
@@ -4785,6 +4804,48 @@ func TestCandidateWaveOrder_FallsBackToSerialOnCycle(t *testing.T) {
 	}
 	if waves[0] != 0 || waves[1] != 1 {
 		t.Fatalf("waves = %#v, want strict serial fallback", waves)
+	}
+}
+
+func TestSortStartCandidatesByPriority_PrioritizesReadyWaits(t *testing.T) {
+	candidates := []startCandidate{
+		{
+			session:     &beads.Bead{Metadata: map[string]string{"session_name": "create", "template": "worker"}},
+			tp:          TemplateParams{TemplateName: "worker"},
+			order:       0,
+			wakeReasons: []WakeReason{WakeCreate},
+		},
+		{
+			session:     &beads.Bead{Metadata: map[string]string{"session_name": "work", "template": "worker"}},
+			tp:          TemplateParams{TemplateName: "worker"},
+			order:       1,
+			wakeReasons: []WakeReason{WakeWork},
+		},
+		{
+			session:     &beads.Bead{Metadata: map[string]string{"session_name": "wait", "template": "worker"}},
+			tp:          TemplateParams{TemplateName: "worker"},
+			order:       2,
+			wakeReasons: []WakeReason{WakeWait},
+		},
+		{
+			session:     &beads.Bead{Metadata: map[string]string{"session_name": "pending", "template": "worker"}},
+			tp:          TemplateParams{TemplateName: "worker"},
+			order:       3,
+			wakeReasons: []WakeReason{WakePending},
+		},
+	}
+
+	sortStartCandidatesByPriority(candidates)
+
+	got := []string{
+		candidates[0].name(),
+		candidates[1].name(),
+		candidates[2].name(),
+		candidates[3].name(),
+	}
+	want := []string{"wait", "pending", "work", "create"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidate order = %#v, want %#v", got, want)
 	}
 }
 

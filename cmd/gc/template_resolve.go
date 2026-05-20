@@ -548,6 +548,9 @@ func resolveTemplate(p *agentBuildParams, cfgAgent *config.Agent, qualifiedName 
 
 func sessionDoltEnv(cityPath, rigRoot string, rigs []config.Rig) map[string]string {
 	env := map[string]string{
+		// GC-owned sessions must not push Dolt remotes just because a rig's
+		// .dolt/config contains an origin remote.
+		"BD_DOLT_AUTO_PUSH": "false",
 		// Suppress bd's built-in Dolt auto-start. The gc controller manages
 		// the server; bd's CLI auto-start launches rogue servers from the
 		// agent's cwd with the wrong data_dir.

@@ -614,6 +614,16 @@ func prepareWaitWakeStateForCityWithSnapshot(cityPath string, store beads.Store,
 			}
 			continue
 		}
+		if sessionBead.Status == "closed" {
+			if err := setWaitTerminalState(store, wait.ID, map[string]string{
+				"state":       waitStateCanceled,
+				"canceled_at": now.UTC().Format(time.RFC3339),
+				"last_error":  "session-closed",
+			}); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if !ok {
 			continue
 		}

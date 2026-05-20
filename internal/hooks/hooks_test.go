@@ -910,41 +910,55 @@ func TestInstallClaudePreservesTightenedRuntimeMode(t *testing.T) {
 	}
 }
 
-// TestInstallClaudeSurfacesEmptyPreferredOverride verifies that a
-// zero-byte .claude/settings.json is treated as malformed and surfaces a
-// descriptive error rather than silently degrading to embedded defaults.
-// A truncated or mid-edit file that happens to be zero bytes is
-// indistinguishable from a valid "empty config" intent — strict behavior
-// is to fail loudly so the user notices the truncation.
+// TestInstallClaudeSurfacesEmptyPreferredOverride verifies that a zero-byte
+// .claude/settings.json is treated as malformed authored config and fails loud.
 func TestInstallClaudeSurfacesEmptyPreferredOverride(t *testing.T) {
 	fs := fsys.NewFake()
 	fs.Files["/city/.claude/settings.json"] = []byte{}
 
 	err := Install(fs, "/city", "/work", []string{"claude"})
 	if err == nil {
-		t.Fatal("Install must surface empty .claude/settings.json as an error")
+		t.Fatal("Install succeeded, want malformed .claude/settings.json error")
 	}
-	if !strings.Contains(err.Error(), ".claude/settings.json") {
-		t.Errorf("error must name the offending path: %v", err)
-	}
-	if !strings.Contains(err.Error(), "empty") {
-		t.Errorf("error must indicate emptiness: %v", err)
+	if got := err.Error(); !strings.Contains(got, ".claude/settings.json") || !strings.Contains(got, "empty file") {
+		t.Fatalf("Install error = %q, want malformed .claude/settings.json context", got)
 	}
 }
 
-// TestInstallClaudeSurfacesMalformedOverride verifies that a syntactically
-// invalid .claude/settings.json surfaces a descriptive error rather than
-// silently falling back to a legacy source or the embedded base.
-func TestInstallClaudeSurfacesMalformedOverride(t *testing.T) {
+// TestInstallClaudeSurfacesMalformedPreferredOverride verifies that
+// syntactically invalid .claude/settings.json content fails loud instead of
+// silently falling back to embedded base settings.
+func TestInstallClaudeSurfacesMalformedPreferredOverride(t *testing.T) {
 	fs := fsys.NewFake()
-	fs.Files["/city/.claude/settings.json"] = []byte(`{not valid json`)
+	fs.Files["/city/.claude/settings.json"] = []byte(`{"malformed_user_marker": true`)
 
 	err := Install(fs, "/city", "/work", []string{"claude"})
 	if err == nil {
-		t.Fatal("Install must surface malformed .claude/settings.json as an error")
+		t.Fatal("Install succeeded, want malformed .claude/settings.json error")
 	}
-	if !strings.Contains(err.Error(), ".claude/settings.json") {
-		t.Errorf("error must name the offending path: %v", err)
+	if got := err.Error(); !strings.Contains(got, ".claude/settings.json") || !strings.Contains(got, "unexpected EOF") {
+		t.Fatalf("Install error = %q, want malformed .claude/settings.json context", got)
+	}
+}
+
+func TestDesiredClaudeSettingsDoesNotFallbackToLegacyAfterMalformedPreferredOverride(t *testing.T) {
+	fs := fsys.NewFake()
+	fs.Files["/city/.claude/settings.json"] = []byte(`{"malformed_user_marker": true`)
+	fs.Files["/city/hooks/claude.json"] = []byte(`{"legacy_hook_marker": true}`)
+	fs.Files["/city/.gc/settings.json"] = []byte(`{"legacy_runtime_marker": true}`)
+
+	data, source, err := desiredClaudeSettings(fs, "/city")
+	if err == nil {
+		t.Fatal("desiredClaudeSettings succeeded, want malformed preferred override error")
+	}
+	if source != claudeSettingsSourceNone {
+		t.Fatalf("source = %v, want no override source on malformed preferred override", source)
+	}
+	if len(data) != 0 {
+		t.Fatalf("data = %q, want none on malformed preferred override", string(data))
+	}
+	if got := err.Error(); !strings.Contains(got, ".claude/settings.json") || !strings.Contains(got, "unexpected EOF") {
+		t.Fatalf("desiredClaudeSettings error = %q, want malformed .claude/settings.json context", got)
 	}
 }
 

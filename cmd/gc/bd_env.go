@@ -92,6 +92,7 @@ func controlBdCommandRunnerForRig(cityPath string, cfg *config.City, rigDir stri
 
 func applyControlBdEnv(env map[string]string) {
 	env["BD_EXPORT_AUTO"] = "false"
+	env["BD_DOLT_AUTO_PUSH"] = "false"
 }
 
 func applyControllerBdEnv(env map[string]string) {
@@ -548,6 +549,10 @@ func bdRuntimeEnv(cityPath string) map[string]string {
 	// dolt.auto-start:false config (beads resolveAutoStart priority bug) and
 	// starts rogue servers from the agent's cwd with the wrong data_dir.
 	env["BEADS_DOLT_AUTO_START"] = "0"
+	// GC owns synchronization of its runtime stores. Beads auto-enables
+	// dolt.auto-push when a persisted origin remote exists, so disable it
+	// explicitly for every GC-managed bd subprocess.
+	env["BD_DOLT_AUTO_PUSH"] = "false"
 	if !cityUsesBdStoreContract(cityPath) {
 		return env
 	}
@@ -566,11 +571,15 @@ func cityRuntimeProcessEnv(cityPath string) []string {
 	cityPath = normalizePathForCompare(cityPath)
 	overrides := cityRuntimeEnvMapForCity(cityPath)
 	if cityUsesBdStoreContract(cityPath) {
-		source := map[string]string{"BEADS_DOLT_AUTO_START": "0"}
+		source := map[string]string{
+			"BD_DOLT_AUTO_PUSH":     "false",
+			"BEADS_DOLT_AUTO_START": "0",
+		}
 		if err := applyResolvedCityDoltEnv(source, cityPath, false); err != nil {
 			clearProjectedDoltEnv(source)
 		}
 		for _, key := range []string{
+			"BD_DOLT_AUTO_PUSH",
 			"GC_DOLT_HOST",
 			"GC_DOLT_PORT",
 			"GC_DOLT_USER",
@@ -650,6 +659,7 @@ func overlayEnvEntries(environ []string, overrides map[string]string) []string {
 
 func mergeRuntimeEnv(environ []string, overrides map[string]string) []string {
 	keys := []string{
+		"BD_DOLT_AUTO_PUSH",
 		"BEADS_CREDENTIALS_FILE",
 		"BEADS_DIR",
 		"BEADS_DOLT_AUTO_START",

@@ -60,3 +60,23 @@ commit = "deadbeef"
 		t.Fatalf("custom entry should be preserved:\n%s", text)
 	}
 }
+
+func TestCoreMolDoWorkFormulaHandlesNonGitWorkspaces(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("packs", "core", "formulas", "mol-do-work.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"git rev-parse --is-inside-work-tree",
+		"Not in a git worktree; skip git status and commit.",
+		"bd close {{issue}} --reason",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("mol-do-work formula missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "bd update {{issue}} --set-metadata gc.outcome=pass --status=closed") {
+		t.Fatalf("mol-do-work formula should use bd close for target completion:\n%s", text)
+	}
+}

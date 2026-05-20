@@ -282,6 +282,97 @@ exit 1
 	}
 }
 
+func TestOrphanSweepPreservesEphemeralMoleculeAssignedToQualifiedAgent(t *testing.T) {
+	cityDir := t.TempDir()
+	binDir := t.TempDir()
+	gcLog := filepath.Join(t.TempDir(), "gc.log")
+
+	writeExecutable(t, filepath.Join(binDir, "gc"), `#!/bin/sh
+printf '%s\n' "$*" >> "$GC_CALL_LOG"
+case "$1" in
+  config)
+    if [ "$2" = "explain" ]; then
+      cat <<'EOF'
+Agent: gastown.deacon
+  source: pack
+EOF
+      exit 0
+    fi
+    ;;
+  rig)
+    if [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+      printf '{"rigs":[{"name":"hq","hq":true},{"name":"project","hq":false}]}\n'
+      exit 0
+    fi
+    ;;
+  session)
+    if [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+      printf '[]\n'
+      exit 0
+    fi
+    ;;
+  bd)
+    if [ "$2" = "list" ]; then
+      case "$*" in
+        *"--rig project"*)
+          cat <<'EOF'
+[
+  {"id":"gc-wisp-orphan","status":"in_progress","assignee":"gastown.missing","issue_type":"molecule","metadata":{"ephemeral":true}}
+]
+EOF
+          ;;
+        *)
+          cat <<'EOF'
+[
+  {"id":"gc-wisp-oneh","status":"in_progress","assignee":"gastown.deacon","issue_type":"molecule","metadata":{"ephemeral":true}}
+]
+EOF
+          ;;
+      esac
+      exit 0
+    fi
+    if [ "$2" = "update" ]; then
+      exit 0
+    fi
+    ;;
+esac
+exit 1
+`)
+
+	env := map[string]string{
+		"GC_CITY":      cityDir,
+		"GC_CITY_PATH": cityDir,
+		"GC_CALL_LOG":  gcLog,
+		"PATH":         binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}
+
+	script := filepath.Join(exampleDir(), "packs", "maintenance", "assets", "scripts", "orphan-sweep.sh")
+	cmd := exec.Command(script)
+	cmd.Env = mergeTestEnv(env)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s failed: %v\n%s", filepath.Base(script), err, out)
+	}
+	if !strings.Contains(string(out), "orphan-sweep: reset 1 orphaned beads") {
+		t.Fatalf("unexpected orphan-sweep output:\n%s", out)
+	}
+
+	logData, err := os.ReadFile(gcLog)
+	if err != nil {
+		t.Fatalf("ReadFile(gc log): %v", err)
+	}
+	log := string(logData)
+	if got := strings.Count(log, "bd update "); got != 1 {
+		t.Fatalf("expected exactly one bd update call, got %d:\n%s", got, log)
+	}
+	if !strings.Contains(log, "bd update gc-wisp-orphan --status=open --assignee=") {
+		t.Fatalf("true orphan bead was not reset:\n%s", log)
+	}
+	if strings.Contains(log, "bd update gc-wisp-oneh ") {
+		t.Fatalf("protected ephemeral molecule was reset:\n%s", log)
+	}
+}
+
 func TestMaintenanceDoltScriptsFallbackToManagedRuntimePorts(t *testing.T) {
 	scripts := []struct {
 		name   string

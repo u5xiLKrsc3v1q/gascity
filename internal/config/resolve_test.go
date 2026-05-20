@@ -410,6 +410,58 @@ func TestResolveProviderBuiltinKiroACPCommand(t *testing.T) {
 	}
 }
 
+func TestResolveProviderCustomKimiBase(t *testing.T) {
+	base := "builtin:kimi"
+	cityProviders := map[string]ProviderSpec{
+		"kimi": {
+			Base:        &base,
+			DisplayName: "Kimi Code CLI + Kimi K2.6",
+			Command:     "{{.ConfigDir}}/../scripts/kimi-ollama",
+			PathCheck:   "kimi",
+			OptionDefaults: map[string]string{
+				"model": "kimi-k2.6",
+			},
+			ProcessNames: []string{"kimi", "Kimi", "Kimi Code", "python"},
+		},
+	}
+	agent := &Agent{Name: "worker", Provider: "kimi"}
+
+	rp, err := ResolveProvider(agent, nil, cityProviders, lookPathOnly("kimi"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.BuiltinAncestor != "kimi" {
+		t.Fatalf("BuiltinAncestor = %q, want kimi", rp.BuiltinAncestor)
+	}
+	if rp.Command != "{{.ConfigDir}}/../scripts/kimi-ollama" {
+		t.Fatalf("Command = %q, want kimi wrapper", rp.Command)
+	}
+	if got, want := rp.Args, []string{"--yolo", "--no-thinking"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Args = %v, want %v", got, want)
+	}
+	if rp.PromptMode != "none" {
+		t.Fatalf("PromptMode = %q, want none", rp.PromptMode)
+	}
+	if got, want := rp.ProcessNames, []string{"kimi", "Kimi", "Kimi Code", "python"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ProcessNames = %v, want %v", got, want)
+	}
+	if !rp.SupportsACP {
+		t.Fatal("SupportsACP = false, want true")
+	}
+	if rp.SupportsHooks {
+		t.Fatal("SupportsHooks = true, want false")
+	}
+	if rp.ResumeFlag != "--session" {
+		t.Fatalf("ResumeFlag = %q, want --session", rp.ResumeFlag)
+	}
+	if rp.ResumeStyle != "flag" {
+		t.Fatalf("ResumeStyle = %q, want flag", rp.ResumeStyle)
+	}
+	if got, want := rp.ResolveDefaultArgs(), []string{"--model", "kimi-k2.6"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ResolveDefaultArgs() = %v, want %v", got, want)
+	}
+}
+
 func TestResolveProviderKiroAgentEnvMerges(t *testing.T) {
 	agent := &Agent{
 		Name:     "scout",

@@ -48,12 +48,13 @@ BEADS_DOLT_SERVER_DATABASE=%s
 BEADS_CREDENTIALS_FILE=%s
 GC_BEADS=%s
 GC_BEADS_PREFIX=%s
+BD_DOLT_AUTO_PUSH=%s
 BD_EXPORT_AUTO=%s
 ' \
   "${BEADS_DIR:-}" "${GC_DOLT_HOST:-}" "${GC_DOLT_PORT:-}" "${GC_DOLT_USER:-}" "${GC_DOLT_PASSWORD:-}" \
   "${BEADS_DOLT_SERVER_HOST:-}" "${BEADS_DOLT_SERVER_PORT:-}" "${BEADS_DOLT_SERVER_USER:-}" "${BEADS_DOLT_PASSWORD:-}" \
   "${BEADS_DOLT_SERVER_DATABASE:-}" "${BEADS_CREDENTIALS_FILE:-}" "${GC_BEADS:-}" "${GC_BEADS_PREFIX:-}" \
-  "${BD_EXPORT_AUTO:-}" > "` + envFile + `"
+  "${BD_DOLT_AUTO_PUSH:-}" "${BD_EXPORT_AUTO:-}" > "` + envFile + `"
 printf '%s
 ' "$*" > "` + argsFile + `"
 case "${1:-}" in
@@ -157,6 +158,9 @@ func TestBdStoreBridgeCreateCmdProjectsCanonicalEnvAndClearsAmbientAuthority(t *
 	}
 	if got := envMap["BD_EXPORT_AUTO"]; got != "false" {
 		t.Fatalf("BD_EXPORT_AUTO = %q, want false to suppress bridge auto-export\n%s", got, string(envText))
+	}
+	if got := envMap["BD_DOLT_AUTO_PUSH"]; got != "false" {
+		t.Fatalf("BD_DOLT_AUTO_PUSH = %q, want false to suppress bridge auto-push\n%s", got, string(envText))
 	}
 
 	argsText, err := os.ReadFile(argsFile)

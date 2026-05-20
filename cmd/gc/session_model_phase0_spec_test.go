@@ -170,7 +170,7 @@ func TestPhase0CanonicalMetadata_ManualCreateWritesSessionOrigin(t *testing.T) {
 }
 
 func TestPhase0CanonicalMetadata_NamedMaterializationWritesNamedOriginWithoutLegacyManualFlag(t *testing.T) {
-	t.Setenv("GC_SESSION", "phase0")
+	t.Setenv("GC_SESSION", "fake")
 
 	store := beads.NewMemStore()
 	cfg := &config.City{
@@ -202,7 +202,7 @@ func TestPhase0CanonicalMetadata_NamedMaterializationWritesNamedOriginWithoutLeg
 }
 
 func TestPhase0CanonicalMetadata_TemplateFactoryMaterializationWritesEphemeralOriginWithoutLegacyPoolFlags(t *testing.T) {
-	t.Setenv("GC_SESSION", "phase0")
+	t.Setenv("GC_SESSION", "fake")
 
 	store := beads.NewMemStore()
 	cfg := &config.City{

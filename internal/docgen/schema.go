@@ -33,9 +33,9 @@ func ModuleRoot() (string, error) {
 // newReflector creates a jsonschema.Reflector configured for TOML field
 // names with Go doc comments extracted from the source tree.
 //
-// AddGoComments requires the path parameter to be "." with the working
-// directory set to the module root, so that filepath.Walk produces paths
-// like "internal/config" which gopath.Join maps to the correct import path.
+// AddGoComments is scoped to the packages reflected by this generator.
+// Walking the module root is both unnecessary and unsafe because local
+// worktrees or scratch directories may contain unrelated Go files.
 func newReflector() (*jsonschema.Reflector, error) {
 	root, err := ModuleRoot()
 	if err != nil {
@@ -55,8 +55,10 @@ func newReflector() (*jsonschema.Reflector, error) {
 	r := &jsonschema.Reflector{
 		FieldNameTag: "toml",
 	}
-	if err := r.AddGoComments("github.com/gastownhall/gascity", "."); err != nil {
-		return nil, fmt.Errorf("extracting Go comments: %w", err)
+	for _, pkg := range []string{"internal/config", "internal/pricing"} {
+		if err := r.AddGoComments("github.com/gastownhall/gascity", pkg); err != nil {
+			return nil, fmt.Errorf("extracting Go comments from %s: %w", pkg, err)
+		}
 	}
 	return r, nil
 }

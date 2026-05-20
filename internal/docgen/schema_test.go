@@ -2,6 +2,8 @@ package docgen
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -55,6 +57,55 @@ func TestGenerateCitySchema(t *testing.T) {
 		if _, ok := props[bad]; ok {
 			t.Errorf("found Go-style property %q, expected TOML name", bad)
 		}
+	}
+}
+
+func TestNewReflectorIgnoresUnrelatedTopLevelGoTrees(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/gastownhall/gascity\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "internal", "config"), 0o755); err != nil {
+		t.Fatalf("mkdir internal/config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "config", "config.go"), []byte("package config\n\n// City is the city config.\ntype City struct{}\n"), 0o644); err != nil {
+		t.Fatalf("write internal/config/config.go: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "internal", "pricing"), 0o755); err != nil {
+		t.Fatalf("mkdir internal/pricing: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "pricing", "pricing.go"), []byte("package pricing\n\n// ModelPricing is a model price.\ntype ModelPricing struct{}\n"), 0o644); err != nil {
+		t.Fatalf("write internal/pricing/pricing.go: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "worktrees", "scratch"), 0o755); err != nil {
+		t.Fatalf("mkdir worktrees/scratch: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "worktrees", "scratch", "bad.go"), []byte("package scratch\n\nfunc broken(\n"), 0o644); err != nil {
+		t.Fatalf("write worktrees/scratch/bad.go: %v", err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir temp root: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Errorf("restore cwd: %v", err)
+		}
+	}()
+
+	r, err := newReflector()
+	if err != nil {
+		t.Fatalf("newReflector: %v", err)
+	}
+	if got := r.CommentMap["github.com/gastownhall/gascity/internal/config.City"]; !strings.Contains(got, "city config") {
+		t.Fatalf("missing config comment, got %q", got)
+	}
+	if got := r.CommentMap["github.com/gastownhall/gascity/internal/pricing.ModelPricing"]; !strings.Contains(got, "model price") {
+		t.Fatalf("missing pricing comment, got %q", got)
 	}
 }
 

@@ -27,8 +27,10 @@ in the arguments.
 All arguments after "gc bd" are forwarded to bd unchanged.
 
 gc bd forces BD_EXPORT_AUTO=false to prevent bd's git auto-export hook
-from wedging the wrapper after printing command output. If you need
-auto-export behavior, invoke bd directly.`,
+from wedging the wrapper after printing command output. It also forces
+BD_DOLT_AUTO_PUSH=false so GC-managed bd calls do not push remotes
+implicitly. If you need auto-export or auto-push behavior, invoke bd
+directly.`,
 		Example: `  gc bd --rig my-project list
   gc bd --rig my-project create "New task"
   gc bd show my-project-abc          # auto-detects rig from bead prefix
@@ -129,7 +131,7 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	cmd := exec.Command(bdPath, bdArgs...)
+	cmd := exec.Command(bdPath, bdArgsWithSandbox(bdArgs)...)
 	cmd.Dir = target.ScopeRoot
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = stdout
@@ -145,6 +147,77 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func bdArgsWithSandbox(args []string) []string {
+	if len(args) == 0 || bdArgsHaveFlag(args, "--sandbox") {
+		return args
+	}
+	switch bdFirstSubcommandArg(args) {
+	case "dolt", "init", "bootstrap":
+		return args
+	}
+	out := make([]string, 0, len(args)+1)
+	out = append(out, "--sandbox")
+	out = append(out, args...)
+	return out
+}
+
+func bdFirstSubcommandArg(args []string) string {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+			return ""
+		}
+		if arg == "" {
+			continue
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			return arg
+		}
+		if strings.Contains(arg, "=") {
+			continue
+		}
+		if bdLeadingBoolFlag(arg) {
+			continue
+		}
+		if bdLeadingValueFlag(arg) {
+			i++
+			continue
+		}
+		return ""
+	}
+	return ""
+}
+
+func bdLeadingBoolFlag(arg string) bool {
+	switch arg {
+	case "--json", "--help", "-h", "--version":
+		return true
+	default:
+		return false
+	}
+}
+
+func bdLeadingValueFlag(arg string) bool {
+	switch arg {
+	case "--id", "--metadata-field", "--limit", "--status", "--assignee", "--type", "--label", "--labels":
+		return true
+	default:
+		return false
+	}
+}
+
+func bdArgsHaveFlag(args []string, flag string) bool {
+	for _, arg := range args {
+		if arg == flag || strings.HasPrefix(arg, flag+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveBdCity(cityName string) (string, error) {

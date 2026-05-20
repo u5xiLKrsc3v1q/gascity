@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -136,9 +137,10 @@ var stopPerTargetTimeoutDefault = 30 * time.Second
 var interruptPerTargetTimeoutMargin = 2 * time.Second
 
 type startCandidate struct {
-	session *beads.Bead
-	tp      TemplateParams
-	order   int
+	session     *beads.Bead
+	tp          TemplateParams
+	order       int
+	wakeReasons []WakeReason
 }
 
 func (c startCandidate) name() string {
@@ -150,6 +152,35 @@ func (c startCandidate) logicalTemplate(cfg *config.City) string {
 		return c.tp.TemplateName
 	}
 	return normalizedSessionTemplate(*c.session, cfg)
+}
+
+func sortStartCandidatesByPriority(candidates []startCandidate) {
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left := startCandidatePriority(candidates[i])
+		right := startCandidatePriority(candidates[j])
+		if left != right {
+			return left < right
+		}
+		return candidates[i].order < candidates[j].order
+	})
+}
+
+func startCandidatePriority(candidate startCandidate) int {
+	switch {
+	case containsWakeReason(candidate.wakeReasons, WakeWait):
+		return 0
+	case containsWakeReason(candidate.wakeReasons, WakePending):
+		return 1
+	case containsWakeReason(candidate.wakeReasons, WakePin),
+		containsWakeReason(candidate.wakeReasons, WakeAttached):
+		return 2
+	case containsWakeReason(candidate.wakeReasons, WakeWork):
+		return 3
+	case containsWakeReason(candidate.wakeReasons, WakeCreate):
+		return 4
+	default:
+		return 5
+	}
 }
 
 type preparedStart struct {
@@ -1704,6 +1735,7 @@ func executePlannedStartsTraced(
 	if startOpts.async && asyncLimiter == nil {
 		asyncLimiter = newAsyncStartLimiter(maxWakes)
 	}
+	sortStartCandidatesByPriority(candidates)
 	waveByCandidate, ok := candidateWaveOrder(candidates, cfg, desiredState, sp, cityName, store, clk)
 	if !ok {
 		fmt.Fprintln(stderr, "session reconciler: dependency graph fallback to serial start order") //nolint:errcheck

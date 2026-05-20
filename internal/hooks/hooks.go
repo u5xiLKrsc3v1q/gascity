@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	iofs "io/fs"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -41,7 +43,7 @@ func SupportedProviders() []string {
 // FamilyResolver maps a raw provider name (which may be a custom wrapper
 // alias like "my-fast-claude") to its built-in family name (e.g. "claude").
 // A nil resolver (or one that returns "") is treated as identity: the raw
-// name is used verbatim for the switch lookup. Provided so callers holding
+// provider name is used for the switch lookup. Provided so callers holding
 // a city-providers map can route wrapped aliases to their ancestor's hook
 // format without pulling the config package into hooks.
 type FamilyResolver func(name string) string
@@ -286,10 +288,11 @@ func desiredClaudeSettings(fs fsys.FS, cityDir string) ([]byte, claudeSettingsSo
 	if sourceKind == claudeSettingsSourceNone {
 		return base, claudeSettingsSourceNone, nil
 	}
-	if len(overrideData) == 0 {
+	if err := validateClaudeSettingsOverride(overrideData); err != nil {
 		if sourceKind == claudeSettingsSourceCityDotClaude {
-			return nil, claudeSettingsSourceNone, fmt.Errorf("empty Claude settings from %s (file present but zero bytes)", overridePath)
+			return nil, claudeSettingsSourceNone, fmt.Errorf("invalid Claude settings from %s: %w", overridePath, err)
 		}
+		warnMalformedClaudeSettingsOverride(overridePath, err)
 		return base, claudeSettingsSourceNone, nil
 	}
 
@@ -298,6 +301,33 @@ func desiredClaudeSettings(fs fsys.FS, cityDir string) ([]byte, claudeSettingsSo
 		return nil, claudeSettingsSourceNone, fmt.Errorf("merging Claude settings from %s: %w", overridePath, err)
 	}
 	return merged, sourceKind, nil
+}
+
+func validateClaudeSettingsOverride(data []byte) error {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return errors.New("empty file")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var doc map[string]any
+	if err := dec.Decode(&doc); err != nil {
+		return err
+	}
+	if doc == nil {
+		return errors.New("expected JSON object")
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+	return nil
+}
+
+func warnMalformedClaudeSettingsOverride(overridePath string, err error) {
+	log.Printf("gc: warning: ignoring malformed Claude settings override %s: %v; using embedded base settings", overridePath, err)
 }
 
 func readClaudeSettingsOverride(fs fsys.FS, cityDir string, base []byte) (string, []byte, claudeSettingsSourceKind, error) {

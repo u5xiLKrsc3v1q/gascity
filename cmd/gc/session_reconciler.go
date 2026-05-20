@@ -1441,9 +1441,10 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 				}, nil, "")
 			}
 			startCandidates = append(startCandidates, startCandidate{
-				session: target.session,
-				tp:      target.tp,
-				order:   len(startCandidates),
+				session:     target.session,
+				tp:          target.tp,
+				order:       len(startCandidates),
+				wakeReasons: append([]WakeReason(nil), eval.Reasons...),
 			})
 		}
 

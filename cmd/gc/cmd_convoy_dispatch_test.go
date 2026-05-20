@@ -2226,10 +2226,16 @@ func TestWorkflowServeControlReadyQueryUsesControlTiers(t *testing.T) {
 	if !strings.Contains(query, "BD_EXPORT_AUTO=false") {
 		t.Fatalf("workflowServeControlReadyQuery should disable bd auto-export: %q", query)
 	}
+	if !strings.Contains(query, "BD_DOLT_AUTO_PUSH=false") {
+		t.Fatalf("workflowServeControlReadyQuery should disable bd auto-push: %q", query)
+	}
+	if !strings.Contains(query, `"${GC_BIN:-gc}" bd --city "$GC_CITY_PATH"`) {
+		t.Fatalf("workflowServeControlReadyQuery should route ready scans through gc bd: %q", query)
+	}
 	for _, want := range []string{
-		`bd --readonly --sandbox ready --assignee="$cand"`,
-		`bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_TARGET" --unassigned`,
-		`bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_LEGACY_TARGET" --unassigned`,
+		`gc_bd --readonly --sandbox ready --assignee="$cand"`,
+		`gc_bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_TARGET" --unassigned`,
+		`gc_bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_LEGACY_TARGET" --unassigned`,
 	} {
 		if !strings.Contains(query, want) {
 			t.Fatalf("workflowServeControlReadyQuery missing %q in %q", want, query)
@@ -2237,6 +2243,19 @@ func TestWorkflowServeControlReadyQueryUsesControlTiers(t *testing.T) {
 	}
 	if !strings.Contains(query, `--limit=20`) {
 		t.Fatalf("workflowServeControlReadyQuery missing scan limit: %q", query)
+	}
+}
+
+func TestWorkflowServeControlReadyQueryIncludesEphemeralReadyWork(t *testing.T) {
+	query := workflowServeControlReadyQuery(config.Agent{Name: config.ControlDispatcherAgentName, Dir: "gascity"})
+	for _, want := range []string{
+		`gc_bd --readonly --sandbox ready --assignee="$cand" --include-ephemeral`,
+		`gc_bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_TARGET" --unassigned --include-ephemeral`,
+		`gc_bd --readonly --sandbox ready --metadata-field "gc.routed_to=$GC_CONTROL_LEGACY_TARGET" --unassigned --include-ephemeral`,
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("workflowServeControlReadyQuery missing ephemeral-ready flag:\n  want substring: %s\n  got: %s", want, query)
+		}
 	}
 }
 
@@ -2252,10 +2271,10 @@ case "$*" in
   "list --status in_progress --assignee=gascity--control-dispatcher --json --limit=20")
     printf '[{"id":"ga-in-progress"}]'
     ;;
-  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --json --limit=20")
+  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --include-ephemeral --json --limit=20")
     printf '[{"id":"ga-ready"}]'
     ;;
-  "--readonly --sandbox ready --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --json --limit=20")
+  "--readonly --sandbox ready --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --include-ephemeral --json --limit=20")
     printf '[{"id":"ga-routed"}]'
     ;;
   *)
@@ -2274,10 +2293,10 @@ func TestWorkflowServeControlReadyQueryIncludesMetadataRoutedWorkAfterAssignedPe
 	}, `#!/bin/sh
 set -eu
 case "$*" in
-  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --json --limit=20")
+  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --include-ephemeral --json --limit=20")
     printf '[{"id":"ga-pending","metadata":{"gc.kind":"retry"}}]'
     ;;
-  "--readonly --sandbox ready --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --json --limit=20")
+  "--readonly --sandbox ready --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --include-ephemeral --json --limit=20")
     printf '[{"id":"ga-ready","metadata":{"gc.kind":"scope-check"}}]'
     ;;
   *)
@@ -2296,10 +2315,10 @@ func TestWorkflowServeControlReadyQueryPreservesQueryPriorityWhenMerging(t *test
 	}, `#!/bin/sh
 set -eu
 case "$*" in
-  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --json --limit=20")
+  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --include-ephemeral --json --limit=20")
     printf '[{"id":"ga-z-assigned"},{"id":"ga-dup","source":"assigned"}]'
     ;;
-  "--readonly --sandbox ready --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --json --limit=20")
+  "--readonly --sandbox ready --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --include-ephemeral --json --limit=20")
     printf '[{"id":"ga-a-routed"},{"id":"ga-dup","source":"routed"}]'
     ;;
   *)
@@ -2323,7 +2342,7 @@ func TestWorkflowServeControlReadyQueryUsesConfiguredRuntimeNameWhenEnvIsManualS
 	}, `#!/bin/sh
 set -eu
 case "$*" in
-  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --json --limit=20")
+  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --include-ephemeral --json --limit=20")
     printf '[{"id":"ga-control-ready"}]'
     ;;
   *)
@@ -2349,9 +2368,13 @@ set -eu
   echo "BD_EXPORT_AUTO=${BD_EXPORT_AUTO:-}" >&2
   exit 43
 }
+[ "${BD_DOLT_AUTO_PUSH:-}" = "false" ] || {
+  echo "BD_DOLT_AUTO_PUSH=${BD_DOLT_AUTO_PUSH:-}" >&2
+  exit 44
+}
 printf '%s\n' "$*" >> "$BD_LOG"
 case "$*" in
-  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --json --limit=20")
+  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --include-ephemeral --json --limit=20")
     printf '[{"id":"ga-control-ready"}]'
     ;;
   *)
@@ -2361,9 +2384,38 @@ esac
 `), 0o755); err != nil {
 		t.Fatalf("write fake bd: %v", err)
 	}
+	gcPath := filepath.Join(tmp, "gc")
+	if err := os.WriteFile(gcPath, []byte(`#!/bin/sh
+set -eu
+[ "$#" -ge 1 ] && [ "$1" = "bd" ] || {
+  echo "unexpected gc command: $*" >&2
+  exit 64
+}
+shift
+case "${1:-}" in
+  --city)
+    [ -n "${2:-}" ] || {
+      echo "missing --city value" >&2
+      exit 64
+    }
+    shift 2
+    ;;
+  --city=*)
+    shift
+    ;;
+  *)
+    echo "missing --city before bd args: $*" >&2
+    exit 64
+    ;;
+esac
+exec bd "$@"
+`), 0o755); err != nil {
+		t.Fatalf("write fake gc: %v", err)
+	}
 	out, err := shellWorkQueryWithEnv(query, t.TempDir(), []string{
 		"PATH=" + tmp + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"BD_LOG=" + logPath,
+		"GC_CITY_PATH=/test-city",
 		"GC_SESSION_ID=mc-manual",
 		"GC_SESSION_NAME=s-mc-manual",
 		"GC_AGENT=s-mc-manual",
@@ -2378,7 +2430,7 @@ esac
 		t.Fatalf("read bd log: %v", err)
 	}
 	firstCall, _, _ := strings.Cut(strings.TrimSpace(string(logData)), "\n")
-	if want := "--readonly --sandbox ready --assignee=gascity--control-dispatcher --json --limit=20"; firstCall != want {
+	if want := "--readonly --sandbox ready --assignee=gascity--control-dispatcher --include-ephemeral --json --limit=20"; firstCall != want {
 		t.Fatalf("first bd call = %q, want %q; all calls:\n%s", firstCall, want, string(logData))
 	}
 }
@@ -2391,15 +2443,16 @@ func TestWorkflowServeControlReadyQueryQuotesMetadataFallbackTarget(t *testing.T
 		"BD_MATCHED_ARGS": argsPath,
 	}, `#!/bin/sh
 set -eu
-if [ "$#" -eq 8 ] &&
+if [ "$#" -eq 9 ] &&
    [ "$1" = "--readonly" ] &&
    [ "$2" = "--sandbox" ] &&
    [ "$3" = "ready" ] &&
    [ "$4" = "--metadata-field" ] &&
    [ "$5" = "gc.routed_to=my rig/control-dispatcher" ] &&
    [ "$6" = "--unassigned" ] &&
-   [ "$7" = "--json" ] &&
-   [ "$8" = "--limit=20" ]; then
+   [ "$7" = "--include-ephemeral" ] &&
+   [ "$8" = "--json" ] &&
+   [ "$9" = "--limit=20" ]; then
   printf '%s\n' "$@" > "$BD_MATCHED_ARGS"
   printf '[{"id":"ga-routed"}]'
   exit 0
@@ -2412,7 +2465,7 @@ printf '[]'
 		t.Fatalf("read matched args: %v", err)
 	}
 	gotArgs := strings.Split(strings.TrimSpace(string(argsData)), "\n")
-	wantArgs := []string{"--readonly", "--sandbox", "ready", "--metadata-field", "gc.routed_to=my rig/control-dispatcher", "--unassigned", "--json", "--limit=20"}
+	wantArgs := []string{"--readonly", "--sandbox", "ready", "--metadata-field", "gc.routed_to=my rig/control-dispatcher", "--unassigned", "--include-ephemeral", "--json", "--limit=20"}
 	if !slices.Equal(gotArgs, wantArgs) {
 		t.Fatalf("matched bd args = %#v, want %#v", gotArgs, wantArgs)
 	}
@@ -2427,7 +2480,7 @@ func TestWorkflowServeControlReadyQueryUsesLegacyRouteForNamedSessions(t *testin
 	}, `#!/bin/sh
 set -eu
 case "$*" in
-  "--readonly --sandbox ready --metadata-field gc.routed_to=gascity/workflow-control --unassigned --json --limit=20")
+  "--readonly --sandbox ready --metadata-field gc.routed_to=gascity/workflow-control --unassigned --include-ephemeral --json --limit=20")
     printf '[{"id":"ga-legacy-route"}]'
     ;;
   *)
@@ -2438,7 +2491,62 @@ esac
 	assertJSONEqual(t, out, `[{"id":"ga-legacy-route"}]`)
 }
 
+func TestWorkflowServeControlReadyQuerySkipsMalformedReadyOutput(t *testing.T) {
+	query := workflowServeControlReadyQuery(config.Agent{Name: config.ControlDispatcherAgentName, Dir: "gascity"})
+	out := runWorkflowServeShellQueryForTest(t, query, map[string]string{
+		"GC_SESSION_NAME": "gascity--control-dispatcher",
+		"GC_ALIAS":        "gascity/control-dispatcher",
+	}, `#!/bin/sh
+set -eu
+case "$*" in
+  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --include-ephemeral --json --limit=20")
+    printf 'not-json'
+    ;;
+  "--readonly --sandbox ready --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --include-ephemeral --json --limit=20")
+    printf '[{"id":"ga-routed"}]'
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac
+`)
+	assertJSONEqual(t, out, `[{"id":"ga-routed"}]`)
+}
+
+func TestWorkflowServeControlReadyQueryContinuesAfterReadyCommandFailure(t *testing.T) {
+	query := workflowServeControlReadyQuery(config.Agent{Name: config.ControlDispatcherAgentName, Dir: "gascity"})
+	out := runWorkflowServeShellQueryForTest(t, query, map[string]string{
+		"GC_SESSION_NAME": "gascity--control-dispatcher",
+		"GC_ALIAS":        "gascity/control-dispatcher",
+	}, `#!/bin/sh
+set -eu
+case "$*" in
+  "--readonly --sandbox ready --assignee=gascity--control-dispatcher --include-ephemeral --json --limit=20")
+    echo "server unreachable" >&2
+    exit 42
+    ;;
+  "--readonly --sandbox ready --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --include-ephemeral --json --limit=20")
+    printf '[{"id":"ga-routed"}]'
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac
+`)
+	assertJSONEqual(t, out, `[{"id":"ga-routed"}]`)
+}
+
 func runWorkflowServeShellQueryForTest(t *testing.T, query string, env map[string]string, bdScript string) string {
+	t.Helper()
+
+	out, err := runWorkflowServeShellQueryForTestErr(t, query, env, bdScript)
+	if err != nil {
+		t.Fatalf("run workflow serve query: %v", err)
+	}
+	return out
+}
+
+func runWorkflowServeShellQueryForTestErr(t *testing.T, query string, env map[string]string, bdScript string) (string, error) {
 	t.Helper()
 
 	tmp := t.TempDir()
@@ -2446,16 +2554,43 @@ func runWorkflowServeShellQueryForTest(t *testing.T, query string, env map[strin
 	if err := os.WriteFile(bdPath, []byte(bdScript), 0o755); err != nil {
 		t.Fatalf("write fake bd: %v", err)
 	}
+	gcPath := filepath.Join(tmp, "gc")
+	if err := os.WriteFile(gcPath, []byte(`#!/bin/sh
+set -eu
+[ "$#" -ge 1 ] && [ "$1" = "bd" ] || {
+  echo "unexpected gc command: $*" >&2
+  exit 64
+}
+shift
+case "${1:-}" in
+  --city)
+    [ -n "${2:-}" ] || {
+      echo "missing --city value" >&2
+      exit 64
+    }
+    shift 2
+    ;;
+  --city=*)
+    shift
+    ;;
+  *)
+    echo "missing --city before bd args: $*" >&2
+    exit 64
+    ;;
+esac
+exec bd "$@"
+`), 0o755); err != nil {
+		t.Fatalf("write fake gc: %v", err)
+	}
 
-	queryEnv := []string{"PATH=" + tmp + string(os.PathListSeparator) + os.Getenv("PATH")}
+	queryEnv := []string{
+		"PATH=" + tmp + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"GC_CITY_PATH=/test-city",
+	}
 	for key, value := range env {
 		queryEnv = append(queryEnv, key+"="+value)
 	}
-	out, err := shellWorkQueryWithEnv(query, t.TempDir(), queryEnv)
-	if err != nil {
-		t.Fatalf("run workflow serve query: %v", err)
-	}
-	return out
+	return shellWorkQueryWithEnv(query, t.TempDir(), queryEnv)
 }
 
 func assertJSONEqual(t *testing.T, got, want string) {
@@ -2689,6 +2824,9 @@ func TestOpenControlStoreDisablesAutoExportWithoutSandboxingWrites(t *testing.T)
 		if got := envs[i]["BD_EXPORT_AUTO"]; got != "false" {
 			t.Fatalf("bd env %d BD_EXPORT_AUTO = %q, want false", i, got)
 		}
+		if got := envs[i]["BD_DOLT_AUTO_PUSH"]; got != "false" {
+			t.Fatalf("bd env %d BD_DOLT_AUTO_PUSH = %q, want false", i, got)
+		}
 	}
 }
 
@@ -2805,6 +2943,9 @@ func TestOpenControlStoreAtForCityUsesControlRunnerForStaleBdScope(t *testing.T)
 	}
 	if got := envs[0]["BD_EXPORT_AUTO"]; got != "false" {
 		t.Fatalf("BD_EXPORT_AUTO = %q, want false", got)
+	}
+	if got := envs[0]["BD_DOLT_AUTO_PUSH"]; got != "false" {
+		t.Fatalf("BD_DOLT_AUTO_PUSH = %q, want false", got)
 	}
 	if got := envs[0]["BEADS_DIR"]; got != filepath.Join(staleRigDir, ".beads") {
 		t.Fatalf("BEADS_DIR = %q, want stale rig store", got)

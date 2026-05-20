@@ -1380,7 +1380,11 @@ func runFreshInitSlingWork(t *testing.T, provider, prompt, outputRel string) (in
 }
 
 func runFreshInitDefaultPoolSlingWork(t *testing.T, provider, prompt, outputRel string) (inferenceRun, map[string]string, map[string]string, string, error) {
-	return runFreshInitSlingWorkForTarget(t, provider, inferenceDefaultPoolAgent, prompt, outputRel, nil, false)
+	return runFreshInitSlingWorkForTarget(t, provider, inferenceDefaultPoolAgent, prompt, outputRel, leaveDefaultPoolWorkspaceWithoutGit, false)
+}
+
+func leaveDefaultPoolWorkspaceWithoutGit(string) error {
+	return nil
 }
 
 func newLiveCity(t *testing.T) *helpers.City {

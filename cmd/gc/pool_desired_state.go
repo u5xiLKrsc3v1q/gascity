@@ -168,6 +168,17 @@ func computePoolDesiredStates(
 	// represent already-spent new demand, so they occupy the first new-demand
 	// slots explicitly before anonymous creates are materialized.
 	if len(scaleCheckCounts) > 0 {
+		type pendingScaleDemand struct {
+			agent        *config.Agent
+			template     string
+			scaleCount   int
+			inFlight     []SessionRequest
+			nextInFlight int
+			remaining    int
+			reused       int
+			anonymous    int
+		}
+		var pending []pendingScaleDemand
 		for i := range cfg.Agents {
 			agent := &cfg.Agents[i]
 			if agent.Suspended {
@@ -178,29 +189,58 @@ func computePoolDesiredStates(
 			if !ok {
 				continue
 			}
-			newCount := capNewDemandCount(limits, usage, agent, scaleCount)
-			inFlight := inFlightNewRequests[template]
-			inFlightCount := minInt(len(inFlight), newCount)
-			if scaleCount > 0 && len(inFlight) > 0 && trace != nil {
-				trace.recordDecision(string(TraceSitePoolInFlightReuse), template, "", string(TraceReasonInFlightReuse), "accepted", traceRecordPayload{
-					"scale_check":   scaleCount,
-					"in_flight":     len(inFlight),
-					"reused":        inFlightCount,
-					"anonymous_new": newCount - inFlightCount,
-				}, nil, "")
-			}
-			for j := 0; j < inFlightCount; j++ {
-				req := inFlight[j]
-				allRequests = append(allRequests, req)
-				usage.accept(req, limits)
-			}
-			for j := inFlightCount; j < newCount; j++ {
-				req := SessionRequest{
-					Template: template,
-					Tier:     "new",
+			maxDemand := capNewDemandCount(limits, usage, agent, scaleCount)
+			pending = append(pending, pendingScaleDemand{
+				agent:      agent,
+				template:   template,
+				scaleCount: scaleCount,
+				inFlight:   inFlightNewRequests[template],
+				remaining:  maxDemand,
+			})
+		}
+		for {
+			progressed := false
+			for i := range pending {
+				if pending[i].remaining <= 0 {
+					continue
+				}
+				req := SessionRequest{Template: pending[i].template, Tier: "new"}
+				consumeInFlight := false
+				if pending[i].nextInFlight < len(pending[i].inFlight) {
+					req = pending[i].inFlight[pending[i].nextInFlight]
+					consumeInFlight = true
+				}
+				if _, _, _, rejected := usage.rejection(req, limits); rejected {
+					pending[i].remaining = 0
+					continue
 				}
 				allRequests = append(allRequests, req)
 				usage.accept(req, limits)
+				if consumeInFlight {
+					pending[i].nextInFlight++
+				}
+				pending[i].remaining--
+				if req.SessionBeadID != "" {
+					pending[i].reused++
+				} else {
+					pending[i].anonymous++
+				}
+				progressed = true
+			}
+			if !progressed {
+				break
+			}
+		}
+		if trace != nil {
+			for _, demand := range pending {
+				if demand.scaleCount > 0 && len(demand.inFlight) > 0 {
+					trace.recordDecision(string(TraceSitePoolInFlightReuse), demand.template, "", string(TraceReasonInFlightReuse), "accepted", traceRecordPayload{
+						"scale_check":   demand.scaleCount,
+						"in_flight":     len(demand.inFlight),
+						"reused":        demand.reused,
+						"anonymous_new": demand.anonymous,
+					}, nil, "")
+				}
 			}
 		}
 	}
