@@ -25,7 +25,6 @@ import (
 	"github.com/gastownhall/gascity/internal/runtime"
 	sessionpkg "github.com/gastownhall/gascity/internal/session"
 	"github.com/gastownhall/gascity/internal/telemetry"
-	"github.com/gastownhall/gascity/internal/worker"
 )
 
 const maxIdleSleepProbesPerTick = 3
@@ -34,6 +33,17 @@ type wakeTarget struct {
 	session *beads.Bead
 	tp      TemplateParams
 	alive   bool
+}
+
+func lifecycleTimerBlocker(metadata map[string]string, now time.Time) string {
+	switch {
+	case metadataTimeInFuture(metadata["held_until"], now):
+		return "user_hold"
+	case metadataTimeInFuture(metadata["quarantined_until"], now):
+		return "quarantine"
+	default:
+		return ""
+	}
 }
 
 // buildDepsMap extracts template dependency edges from config for topo ordering.
@@ -887,7 +897,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 					if configuredNames[name] {
 						reason = "suspended"
 					}
-					hasAssignedWork, assignedErr := sessionHasOpenAssignedWork(store, rigStores, *session)
+					hasAssignedWork, assignedErr := sessionHasOpenAssignedWorkForConfig(store, rigStores, *session, cfg)
 					if assignedErr != nil {
 						fmt.Fprintf(stderr, "session reconciler: checking assigned work before %s drain for %s: %v\n", reason, name, assignedErr) //nolint:errcheck
 						continue
@@ -946,12 +956,9 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 
 		// Liveness includes zombie detection: tmux session exists AND
 		// the expected child process is alive (when ProcessNames configured).
-		obs, err := workerObserveSessionTargetWithRuntimeHintsWithConfig(cityPath, store, sp, cfg, session.ID, tp.Hints.ProcessNames)
-		if err != nil {
-			obs = worker.LiveObservation{}
-		}
-		running := obs.Running
-		alive := obs.Alive
+		// The desired-session fast path only needs running/alive; attachment
+		// and activity are probed by the narrower branches that use them.
+		running, alive := observeRuntimeProviderLiveness(sp, name, tp.Hints.ProcessNames)
 		peek := cachedSessionPeek(cityPath, store, sp, cfg, session.ID, tp.Hints.ProcessNames)
 
 		// Zombie capture: session exists but process dead — grab scrollback for forensics.
@@ -1554,11 +1561,20 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 		if maxAgeTr != nil && alive {
 			creationCompleteAt, hasAnchor := parseRFC3339Metadata(session.Metadata["creation_complete_at"])
 			if hasAnchor && maxAgeTr.shouldRestart(name, creationCompleteAt, clk.Now()) {
-				if pendingInteractionKeepsAwake(*session, sp, name, clk) {
+				blocker := lifecycleTimerBlocker(session.Metadata, clk.Now())
+				switch {
+				case blocker != "":
+					// Respect lifecycle timer blockers already enforced by
+					// wake evaluation. Bypass the max-age restart so
+					// SleepPatch does not rewrite the intended sleep state.
+					if trace != nil {
+						trace.recordDecision("reconciler.session.max_session_age", tp.TemplateName, name, blocker, "deferred_"+blocker, nil, nil, "")
+					}
+				case pendingInteractionKeepsAwake(*session, sp, name, clk):
 					if trace != nil {
 						trace.recordDecision("reconciler.session.max_session_age", tp.TemplateName, name, "pending", "deferred_pending", nil, nil, "")
 					}
-				} else {
+				default:
 					hasWork, assignedErr := sessionHasOpenAssignedWorkForReachableStore(cityPath, cfg, store, rigStores, *session)
 					if assignedErr != nil {
 						// Fail closed: treat error as "has work" so a transient
@@ -1603,7 +1619,17 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 
 		// Idle timeout: restart sessions idle longer than configured threshold.
 		if it != nil && alive && it.checkIdle(name, sp, clk.Now()) {
-			if pendingInteractionKeepsAwake(*session, sp, name, clk) {
+			blocker := lifecycleTimerBlocker(session.Metadata, clk.Now())
+			switch {
+			case blocker != "":
+				// Respect lifecycle timer blockers without skipping the
+				// post-loop wake/drain pass. A metadata-only suspend uses
+				// sleep_intent=user-hold and still needs that pass to drain
+				// the live runtime.
+				if trace != nil {
+					trace.recordDecision("reconciler.session.idle_timeout", tp.TemplateName, name, blocker, "deferred_"+blocker, nil, nil, "")
+				}
+			case pendingInteractionKeepsAwake(*session, sp, name, clk):
 				drainCancelled := false
 				if dt != nil {
 					drainCancelled = cancelSessionDrain(*session, sp, dt)
@@ -1614,33 +1640,34 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 					}, nil, "")
 				}
 				continue
-			}
-			fmt.Fprintf(stderr, "session reconciler: idle timeout for %s\n", tp.DisplayName()) //nolint:errcheck // best-effort stderr
-			if trace != nil {
-				trace.recordDecision("reconciler.session.idle_timeout", tp.TemplateName, name, "idle_timeout", "stop", nil, nil, "")
-			}
-			if err := workerKillSessionTargetWithConfig("", store, sp, cfg, name); err != nil {
-				fmt.Fprintf(stderr, "session reconciler: stopping idle %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
-			} else {
-				_ = sp.ClearScrollback(name)
-				rec.Record(events.Event{
-					Type:    events.SessionIdleKilled,
-					Actor:   "gc",
-					Subject: tp.DisplayName(),
-				})
-				telemetry.RecordAgentIdleKill(context.Background(), tp.DisplayName())
-				// Mark for immediate re-wake on this same tick by clearing
-				// last_woke_at and setting state to asleep. The wake logic
-				// below will pick it up.
-				batch := sessionpkg.SleepPatch(clk.Now(), "idle-timeout")
-				_ = store.SetMetadataBatch(session.ID, batch)
-				if session.Metadata == nil {
-					session.Metadata = make(map[string]string, len(batch))
+			default:
+				fmt.Fprintf(stderr, "session reconciler: idle timeout for %s\n", tp.DisplayName()) //nolint:errcheck // best-effort stderr
+				if trace != nil {
+					trace.recordDecision("reconciler.session.idle_timeout", tp.TemplateName, name, "idle_timeout", "stop", nil, nil, "")
 				}
-				for key, value := range batch {
-					session.Metadata[key] = value
+				if err := workerKillSessionTargetWithConfig("", store, sp, cfg, name); err != nil {
+					fmt.Fprintf(stderr, "session reconciler: stopping idle %s: %v\n", name, err) //nolint:errcheck // best-effort stderr
+				} else {
+					_ = sp.ClearScrollback(name)
+					rec.Record(events.Event{
+						Type:    events.SessionIdleKilled,
+						Actor:   "gc",
+						Subject: tp.DisplayName(),
+					})
+					telemetry.RecordAgentIdleKill(context.Background(), tp.DisplayName())
+					// Mark for immediate re-wake on this same tick by clearing
+					// last_woke_at and setting state to asleep. The wake logic
+					// below will pick it up.
+					batch := sessionpkg.SleepPatch(clk.Now(), "idle-timeout")
+					_ = store.SetMetadataBatch(session.ID, batch)
+					if session.Metadata == nil {
+						session.Metadata = make(map[string]string, len(batch))
+					}
+					for key, value := range batch {
+						session.Metadata[key] = value
+					}
+					alive = false
 				}
-				alive = false
 			}
 			// Fall through to wakeReasons — it will re-wake immediately if config present
 		}
@@ -1672,15 +1699,15 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 		name := target.session.Metadata["session_name"]
 		decision := awakeDecisions[name]
 		if decision.ShouldWake && !pendingInteractionReady(sp, name) && target.session.Metadata["pin_awake"] != "true" && configWakeSuppressed(*target.session, policy, sp, clk) {
-			// Active demand (poolDesired > 0) overrides sleep suppression
-			// for non-interactive sessions (matching the old
-			// evaluateWakeReasons behavior). Interactive sessions honor
-			// their idle window regardless of demand — an idle chat
-			// session should still sleep to release resources.
+			// Active demand (poolDesired > 0 or direct assigned work)
+			// overrides sleep suppression for non-interactive sessions
+			// (matching the old evaluateWakeReasons behavior). Interactive
+			// sessions honor their idle window regardless of demand — an
+			// idle chat session should still sleep to release resources.
 			// Explicit sleep_intent always wins — if the session has
 			// signaled it wants to sleep, honor that regardless of demand.
 			template := normalizedSessionTemplate(*target.session, cfg)
-			hasDemand := poolDesired[template] > 0
+			hasDemand := poolDesired[template] > 0 || eval.HasAssignedWork
 			hasExplicitSleepIntent := target.session.Metadata["sleep_intent"] != ""
 			demandOverrides := hasDemand && policy.Class == config.SessionSleepNonInteractive && !hasExplicitSleepIntent
 			if !demandOverrides {
@@ -1954,23 +1981,14 @@ func resolvePreservedConfiguredNamedSessionTemplate(
 	return tp, nil
 }
 
-// sessionHasOpenAssignedWork reports whether any open or in-progress work bead
-// is assigned to the given session across all known stores. Use this
-// cross-store query for cleanup-of-record paths that must not orphan work in
-// any attached store; callers preserve fail-closed behavior by refusing close
-// decisions on query errors. Reconciler close paths that should honor the
-// session's configured store reachability must use
-// sessionHasOpenAssignedWorkForReachableStore instead.
-func sessionHasOpenAssignedWork(store beads.Store, rigStores map[string]beads.Store, session beads.Bead) (bool, error) {
-	if has, err := sessionHasOpenAssignedWorkInStore(store, session); err != nil || has {
-		return has, err
-	}
-	for _, rs := range rigStores {
-		if has, err := sessionHasOpenAssignedWorkInStore(rs, session); err != nil || has {
-			return has, err
-		}
-	}
-	return false, nil
+// sessionHasOpenAssignedWorkForConfig uses the same configured-named-session
+// fallback identity strategy as sessionAssigneeMatches, but queries all known
+// stores instead of a single configured reachable store. Use this cross-store
+// query for cleanup-of-record paths that must not orphan work in any attached
+// store; callers preserve fail-closed behavior by refusing close decisions on
+// query errors.
+func sessionHasOpenAssignedWorkForConfig(store beads.Store, rigStores map[string]beads.Store, session beads.Bead, cfg *config.City) (bool, error) {
+	return sessionHasOpenAssignedWorkInStores(store, rigStores, sessionAssignmentIdentifiersForConfig(session, cfg))
 }
 
 // sessionHasOpenAssignedWorkForReachableStore reports whether any open or
@@ -1983,18 +2001,19 @@ func sessionHasOpenAssignedWorkForReachableStore(
 	rigStores map[string]beads.Store,
 	session beads.Bead,
 ) (bool, error) {
+	identifiers := sessionAssignmentIdentifiersForConfig(session, cfg)
 	storeRef, ok := assignedWorkStoreRefForSession(cityPath, cfg, session)
 	if !ok {
-		return sessionHasOpenAssignedWork(store, rigStores, session)
+		return sessionHasOpenAssignedWorkInStores(store, rigStores, identifiers)
 	}
 	if storeRef == "" {
-		return sessionHasOpenAssignedWorkInStore(store, session)
+		return sessionHasOpenAssignedWorkInStoreByIdentifiers(store, identifiers)
 	}
 	rigStore, ok := rigStores[storeRef]
 	if !ok || rigStore == nil {
 		return false, fmt.Errorf("rig store %q unavailable for session %q", storeRef, session.Metadata["session_name"])
 	}
-	return sessionHasOpenAssignedWorkInStore(rigStore, session)
+	return sessionHasOpenAssignedWorkInStoreByIdentifiers(rigStore, identifiers)
 }
 
 func assignedWorkStoreRefForSession(cityPath string, cfg *config.City, session beads.Bead) (string, bool) {
@@ -2038,33 +2057,33 @@ func firstOpenAssignedWorkBeadForReachableStore(
 	rigStores map[string]beads.Store,
 	session beads.Bead,
 ) (beads.Bead, bool, error) {
+	identifiers := sessionAssignmentIdentifiersForConfig(session, cfg)
 	storeRef, ok := assignedWorkStoreRefForSession(cityPath, cfg, session)
 	if !ok {
-		if bead, found, err := firstOpenAssignedWorkBeadInStore(store, session); err != nil || found {
+		if bead, found, err := firstOpenAssignedWorkBeadInStoreByIdentifiers(store, identifiers); err != nil || found {
 			return bead, found, err
 		}
 		for _, rs := range rigStores {
-			if bead, found, err := firstOpenAssignedWorkBeadInStore(rs, session); err != nil || found {
+			if bead, found, err := firstOpenAssignedWorkBeadInStoreByIdentifiers(rs, identifiers); err != nil || found {
 				return bead, found, err
 			}
 		}
 		return beads.Bead{}, false, nil
 	}
 	if storeRef == "" {
-		return firstOpenAssignedWorkBeadInStore(store, session)
+		return firstOpenAssignedWorkBeadInStoreByIdentifiers(store, identifiers)
 	}
 	rigStore, ok := rigStores[storeRef]
 	if !ok || rigStore == nil {
 		return beads.Bead{}, false, fmt.Errorf("rig store %q unavailable for session %q", storeRef, session.Metadata["session_name"])
 	}
-	return firstOpenAssignedWorkBeadInStore(rigStore, session)
+	return firstOpenAssignedWorkBeadInStoreByIdentifiers(rigStore, identifiers)
 }
 
-func firstOpenAssignedWorkBeadInStore(store beads.Store, session beads.Bead) (beads.Bead, bool, error) {
+func firstOpenAssignedWorkBeadInStoreByIdentifiers(store beads.Store, identifiers []string) (beads.Bead, bool, error) {
 	if store == nil {
 		return beads.Bead{}, false, nil
 	}
-	identifiers := sessionAssignmentIdentifiers(session)
 	seen := make(map[string]struct{}, len(identifiers))
 	for _, status := range []string{"in_progress", "open"} {
 		for _, assignee := range identifiers {
@@ -2092,10 +2111,25 @@ func firstOpenAssignedWorkBeadInStore(store beads.Store, session beads.Bead) (be
 }
 
 func sessionHasOpenAssignedWorkInStore(store beads.Store, session beads.Bead) (bool, error) {
+	return sessionHasOpenAssignedWorkInStoreByIdentifiers(store, sessionAssignmentIdentifiers(session))
+}
+
+func sessionHasOpenAssignedWorkInStores(store beads.Store, rigStores map[string]beads.Store, identifiers []string) (bool, error) {
+	if has, err := sessionHasOpenAssignedWorkInStoreByIdentifiers(store, identifiers); err != nil || has {
+		return has, err
+	}
+	for _, rs := range rigStores {
+		if has, err := sessionHasOpenAssignedWorkInStoreByIdentifiers(rs, identifiers); err != nil || has {
+			return has, err
+		}
+	}
+	return false, nil
+}
+
+func sessionHasOpenAssignedWorkInStoreByIdentifiers(store beads.Store, identifiers []string) (bool, error) {
 	if store == nil {
 		return false, nil
 	}
-	identifiers := sessionAssignmentIdentifiers(session)
 	seen := make(map[string]struct{}, len(identifiers))
 	for _, status := range []string{"open", "in_progress"} {
 		for _, assignee := range identifiers {

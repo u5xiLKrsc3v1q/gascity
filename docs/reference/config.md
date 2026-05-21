@@ -15,7 +15,7 @@ City is the top-level configuration for a Gas City instance.
 | `providers` | map[string]ProviderSpec |  |  | Providers defines named provider presets for agent startup. |
 | `packs` | map[string]PackSource |  |  | Packs defines named remote pack sources fetched via git (V1 mechanism). |
 | `imports` | map[string]Import |  |  | Imports defines named pack imports (V2 mechanism). Each key is a binding name; the value specifies the source and optional version, export, and transitive controls. Processed during ExpandCityPacks. |
-| `agent` | []Agent | **yes** |  | Agents lists all configured agents in this city. |
+| `agent` | []Agent |  |  | Agents lists all configured agents in this city. Optional: PackV2 cities compose agents through [imports.*] and ship without any [[agent]] block. |
 | `named_session` | []NamedSession |  |  | NamedSessions lists canonical alias-backed sessions built from reusable agent templates. |
 | `rigs` | []Rig |  |  | Rigs lists external projects registered in the city. |
 | `patches` | Patches |  |  | Patches holds targeted modifications applied after fragment merge. |
@@ -74,6 +74,7 @@ Agent defines a configured agent in the city.
 | `session` | string |  |  | Session overrides the session transport for this agent. "" (default) uses the city-level session provider (typically tmux). "acp" uses the Agent Client Protocol (JSON-RPC over stdio). The agent's resolved provider must have supports_acp = true. Enum: `acp` |
 | `provider` | string |  |  | Provider names the provider preset to use for this agent. |
 | `start_command` | string |  |  | StartCommand overrides the provider's command for this agent. |
+| `lifecycle` | string |  |  | Lifecycle controls runtime lifetime semantics. Empty uses the default long-lived session lifecycle; "one_shot" means the command is expected to do bounded work and exit cleanly. Enum: `one_shot` |
 | `args` | []string |  |  | Args overrides the provider's default arguments. |
 | `prompt_mode` | string |  | `arg` | PromptMode controls how prompts are delivered: "arg", "flag", or "none". Enum: `arg`, `flag`, `none` |
 | `prompt_flag` | string |  |  | PromptFlag is the CLI flag used to pass prompts when prompt_mode is "flag". |
@@ -144,10 +145,11 @@ AgentOverride modifies a pack-stamped agent for a specific rig.
 | `env` | map[string]string |  |  | Env adds or overrides environment variables. |
 | `env_remove` | []string |  |  | EnvRemove lists env var keys to remove. |
 | `pre_start` | []string |  |  | PreStart overrides the agent's pre_start commands. |
-| `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. Relative paths resolve against the city directory. |
+| `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. Relative paths resolve against the declaring config file's directory (pack-safe). Paths prefixed with "//" resolve against the city root. |
 | `session` | string |  |  | Session overrides the session transport ("acp"). |
 | `provider` | string |  |  | Provider overrides the provider name. |
 | `start_command` | string |  |  | StartCommand overrides the start command. |
+| `lifecycle` | string |  |  | Lifecycle overrides the runtime lifecycle ("one_shot" or empty). Enum: `one_shot` |
 | `nudge` | string |  |  | Nudge overrides the nudge text. |
 | `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout duration string (e.g., "30s", "5m", "1h"). |
 | `max_session_age` | string |  |  | MaxSessionAge overrides the max session age. Duration string (e.g., "5h"). Empty disables preemptive restart. |
@@ -161,7 +163,7 @@ AgentOverride modifies a pack-stamped agent for a specific rig.
 | `session_setup` | []string |  |  | SessionSetup overrides the agent's session_setup commands. |
 | `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. Relative paths resolve against the declaring config file's directory (pack-safe). Paths prefixed with "//" resolve against the city root. |
 | `session_live` | []string |  |  | SessionLive overrides the agent's session_live commands. |
-| `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the city directory. |
+| `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the declaring config file's directory (pack-safe). Paths prefixed with "//" resolve against the city root. |
 | `default_sling_formula` | string |  |  | DefaultSlingFormula overrides the default sling formula. |
 | `inject_fragments` | []string |  |  | InjectFragments overrides the agent's inject_fragments list. Leave this field unset to keep inherited fragments; JSON callers may send null for the same no-op. Set an empty list to clear fragments; set a populated list to replace fragments. |
 | `append_fragments` | []string |  |  | AppendFragments appends named template fragments to this agent's rendered prompt. It is the V2 spelling for per-agent fragment selection. |
@@ -196,10 +198,11 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 | `env` | map[string]string |  |  | Env adds or overrides environment variables. |
 | `env_remove` | []string |  |  | EnvRemove lists env var keys to remove after merging. |
 | `pre_start` | []string |  |  | PreStart overrides the agent's pre_start commands. |
-| `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. Relative paths resolve against the city directory. |
+| `prompt_template` | string |  |  | PromptTemplate overrides the prompt template path. Relative paths resolve against the declaring config file's directory (pack-safe). Paths prefixed with "//" resolve against the city root. |
 | `session` | string |  |  | Session overrides the session transport ("acp" or "tmux"). |
 | `provider` | string |  |  | Provider overrides the provider name. |
 | `start_command` | string |  |  | StartCommand overrides the start command. |
+| `lifecycle` | string |  |  | Lifecycle overrides the runtime lifecycle ("one_shot" or empty). Enum: `one_shot` |
 | `nudge` | string |  |  | Nudge overrides the nudge text. |
 | `idle_timeout` | string |  |  | IdleTimeout overrides the idle timeout. Duration string (e.g., "30s", "5m", "1h"). |
 | `max_session_age` | string |  |  | MaxSessionAge overrides the max session age. Duration string (e.g., "5h"). |
@@ -215,7 +218,7 @@ AgentPatch modifies an existing agent identified by (Dir, Name).
 | `session_setup` | []string |  |  | SessionSetup overrides the agent's session_setup commands. |
 | `session_setup_script` | string |  |  | SessionSetupScript overrides the agent's session_setup_script path. Relative paths resolve against the declaring config file's directory (pack-safe). Paths prefixed with "//" resolve against the city root. |
 | `session_live` | []string |  |  | SessionLive overrides the agent's session_live commands. |
-| `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the city directory. |
+| `overlay_dir` | string |  |  | OverlayDir overrides the agent's overlay_dir path. Copies contents additively into the agent's working directory at startup. Relative paths resolve against the declaring config file's directory (pack-safe). Paths prefixed with "//" resolve against the city root. |
 | `default_sling_formula` | string |  |  | DefaultSlingFormula overrides the default sling formula. |
 | `inject_fragments` | []string |  |  | InjectFragments overrides the agent's inject_fragments list. Leave this field unset to keep inherited fragments; JSON callers may send null for the same no-op. Set an empty list to clear fragments; set a populated list to replace fragments. |
 | `append_fragments` | []string |  |  | AppendFragments overrides the agent's append_fragments list. |
@@ -255,7 +258,7 @@ ConvergenceConfig holds convergence loop limits.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `max_per_agent` | integer |  | `2` | MaxPerAgent is the maximum number of active convergence loops per agent. 0 means use default (2). |
+| `max_per_agent` | integer |  | `2` | MaxPerAgent is the maximum number of active convergence loops per agent in each bead store scope. City/HQ and each bound rig enforce the limit independently. 0 means use default (2). |
 | `max_total` | integer |  | `10` | MaxTotal is the maximum total number of active convergence loops. 0 means use default (10). |
 
 ## DaemonConfig
@@ -668,4 +671,5 @@ Workspace holds city-level metadata and optional defaults that apply to all agen
 | `global_fragments` | []string |  |  | GlobalFragments lists named template fragments injected into every agent's rendered prompt. Applied before per-agent InjectFragments. Each name must match a &#123;&#123; define "name" &#125;&#125; block from a pack's prompts/shared/ directory. |
 | `includes` | []string |  |  | Includes is the legacy city.toml pack-composition list.  Deprecated: use root pack.toml [imports.*] instead. Run gc doctor to inspect; gc doctor --fix handles the safe mechanical rewrites available in this release wave. Each entry is a local path, a git source//sub#ref URL, or a GitHub tree URL. |
 | `default_rig_includes` | []string |  |  | DefaultRigIncludes is the legacy city.toml default-rig pack list.  Deprecated: use root pack.toml [defaults.rig.imports.&lt;binding&gt;] instead. Run gc doctor to inspect; gc doctor --fix handles the safe mechanical rewrites available in this release wave. |
+| `env` | map[string]string |  |  | Env defines workspace-wide environment variables applied to every managed session. Lowest config-precedence — overridden by provider, agent, and patch env. Use for cross-cutting variables like GC_TARGET_BRANCH that every agent should inherit. |
 

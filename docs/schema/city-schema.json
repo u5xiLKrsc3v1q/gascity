@@ -104,6 +104,13 @@
           "type": "string",
           "description": "StartCommand overrides the provider's command for this agent."
         },
+        "lifecycle": {
+          "type": "string",
+          "enum": [
+            "one_shot"
+          ],
+          "description": "Lifecycle controls runtime lifetime semantics. Empty uses the default\nlong-lived session lifecycle; \"one_shot\" means the command is expected\nto do bounded work and exit cleanly."
+        },
         "args": {
           "items": {
             "type": "string"
@@ -423,7 +430,7 @@
         },
         "prompt_template": {
           "type": "string",
-          "description": "PromptTemplate overrides the prompt template path.\nRelative paths resolve against the city directory."
+          "description": "PromptTemplate overrides the prompt template path.\nRelative paths resolve against the declaring config file's directory\n(pack-safe). Paths prefixed with \"//\" resolve against the city root."
         },
         "session": {
           "type": "string",
@@ -436,6 +443,13 @@
         "start_command": {
           "type": "string",
           "description": "StartCommand overrides the start command."
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": [
+            "one_shot"
+          ],
+          "description": "Lifecycle overrides the runtime lifecycle (\"one_shot\" or empty)."
         },
         "nudge": {
           "type": "string",
@@ -506,7 +520,7 @@
         },
         "overlay_dir": {
           "type": "string",
-          "description": "OverlayDir overrides the agent's overlay_dir path. Copies contents\nadditively into the agent's working directory at startup.\nRelative paths resolve against the city directory."
+          "description": "OverlayDir overrides the agent's overlay_dir path. Copies contents\nadditively into the agent's working directory at startup.\nRelative paths resolve against the declaring config file's directory\n(pack-safe). Paths prefixed with \"//\" resolve against the city root."
         },
         "default_sling_formula": {
           "type": "string",
@@ -674,7 +688,7 @@
         },
         "prompt_template": {
           "type": "string",
-          "description": "PromptTemplate overrides the prompt template path.\nRelative paths resolve against the city directory."
+          "description": "PromptTemplate overrides the prompt template path.\nRelative paths resolve against the declaring config file's directory\n(pack-safe). Paths prefixed with \"//\" resolve against the city root."
         },
         "session": {
           "type": "string",
@@ -687,6 +701,13 @@
         "start_command": {
           "type": "string",
           "description": "StartCommand overrides the start command."
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": [
+            "one_shot"
+          ],
+          "description": "Lifecycle overrides the runtime lifecycle (\"one_shot\" or empty)."
         },
         "nudge": {
           "type": "string",
@@ -771,7 +792,7 @@
         },
         "overlay_dir": {
           "type": "string",
-          "description": "OverlayDir overrides the agent's overlay_dir path. Copies contents\nadditively into the agent's working directory at startup.\nRelative paths resolve against the city directory."
+          "description": "OverlayDir overrides the agent's overlay_dir path. Copies contents\nadditively into the agent's working directory at startup.\nRelative paths resolve against the declaring config file's directory\n(pack-safe). Paths prefixed with \"//\" resolve against the city root."
         },
         "default_sling_formula": {
           "type": "string",
@@ -939,7 +960,7 @@
             "$ref": "#/$defs/Agent"
           },
           "type": "array",
-          "description": "Agents lists all configured agents in this city."
+          "description": "Agents lists all configured agents in this city. Optional: PackV2\ncities compose agents through [imports.*] and ship without any\n[[agent]] block."
         },
         "named_session": {
           "items": {
@@ -1033,8 +1054,7 @@
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "workspace",
-        "agent"
+        "workspace"
       ],
       "description": "City is the top-level configuration for a Gas City instance."
     },
@@ -1042,7 +1062,7 @@
       "properties": {
         "max_per_agent": {
           "type": "integer",
-          "description": "MaxPerAgent is the maximum number of active convergence loops per agent.\n0 means use default (2).",
+          "description": "MaxPerAgent is the maximum number of active convergence loops per agent\nin each bead store scope. City/HQ and each bound rig enforce the limit\nindependently. 0 means use default (2).",
           "default": 2
         },
         "max_total": {
@@ -2290,6 +2310,13 @@
           },
           "type": "array",
           "description": "DefaultRigIncludes is the legacy city.toml default-rig pack list.\n\nDeprecated: use root pack.toml [defaults.rig.imports.\u003cbinding\u003e] instead.\nRun gc doctor to inspect; gc doctor --fix handles the safe mechanical\nrewrites available in this release wave."
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Env defines workspace-wide environment variables applied to every\nmanaged session. Lowest config-precedence — overridden by provider,\nagent, and patch env. Use for cross-cutting variables like\nGC_TARGET_BRANCH that every agent should inherit."
         }
       },
       "additionalProperties": false,

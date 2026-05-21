@@ -314,7 +314,18 @@ func TestRegisterCityWithSupervisorFailsFastWhenSupervisorStopsDuringWait(t *tes
 	if waitStarted.IsZero() {
 		t.Fatal("supervisor wait path was not reached")
 	}
-	if elapsed := time.Since(waitStarted); elapsed > 250*time.Millisecond {
+	// The fast-failure budget is intentionally generous (well under the test's
+	// 5s startup_timeout but well above the wait-loop's logical exit time).
+	// waitStarted is captured inside the first alive-hook callback, so the
+	// elapsed window measures everything from that point onward: the
+	// remaining ensureLegacyNamedPacksCached / MaterializeBuiltinPacks work,
+	// the wait-loop's first iteration, the error formatting, the
+	// keepRegisteredCity stderr writes, and the assertion itself. Under CPU
+	// contention or a GC pause these can balloon to several hundred ms on
+	// CI hosts (ga-q42 flake observations: up to 715ms). 2s preserves the
+	// "fails fast vs. polls until 5s startup_timeout" regression guard while
+	// no longer flaking on slow hosts.
+	if elapsed := time.Since(waitStarted); elapsed > 2*time.Second {
 		t.Fatalf("registerCityWithSupervisor took %v, want fast failure when supervisor stops", elapsed)
 	}
 	if !strings.Contains(stderr.String(), "keeping registration") {
@@ -515,6 +526,37 @@ func TestLoadStartCityConfigMaterializesBuiltinPackImportsBeforeLoad(t *testing.
 	}
 	if _, err := os.Stat(filepath.Join(cityPath, citylayout.SystemPacksRoot, "gastown", "pack.toml")); err != nil {
 		t.Fatalf("expected gastown builtin pack to be materialized before start config load: %v", err)
+	}
+}
+
+func TestLoadStartCityConfigBuiltinGastownMayorHasNoStartupNudge(t *testing.T) {
+	cityPath := writeCityWithUnmaterializedGastownImport(t)
+
+	cfg, _, err := loadStartCityConfig(cityPath)
+	if err != nil {
+		t.Fatalf("loadStartCityConfig returned error: %v", err)
+	}
+
+	var mayor *config.Agent
+	for i := range cfg.Agents {
+		if cfg.Agents[i].Name == "mayor" {
+			mayor = &cfg.Agents[i]
+			break
+		}
+	}
+	if mayor == nil {
+		t.Fatal("expected builtin gastown mayor agent to be present")
+	}
+	if mayor.Nudge != "" {
+		t.Fatalf("builtin gastown mayor nudge = %q, want empty for always-on resident coordinator", mayor.Nudge)
+	}
+
+	data, err := os.ReadFile(filepath.Join(cityPath, citylayout.SystemPacksRoot, "gastown", "agents", "mayor", "agent.toml"))
+	if err != nil {
+		t.Fatalf("read materialized mayor agent.toml: %v", err)
+	}
+	if strings.Contains(string(data), "nudge =") {
+		t.Fatalf("materialized builtin mayor agent.toml should not contain a startup nudge:\n%s", string(data))
 	}
 }
 

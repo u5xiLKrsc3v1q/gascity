@@ -49,6 +49,32 @@ func (w *switchableWriter) Write(p []byte) (int, error) {
 	return w.target.Write(p)
 }
 
+type countingWriter struct {
+	target io.Writer
+	mu     sync.Mutex
+	n      int64
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	if w == nil || w.target == nil {
+		return 0, io.ErrClosedPipe
+	}
+	n, err := w.target.Write(p)
+	w.mu.Lock()
+	w.n += int64(n)
+	w.mu.Unlock()
+	return n, err
+}
+
+func (w *countingWriter) BytesWritten() int64 {
+	if w == nil {
+		return 0
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.n
+}
+
 func (e *commandExitError) Error() string {
 	if e == nil {
 		return "exit"
@@ -121,13 +147,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	execStdout := &switchableWriter{target: stdout}
 	var jsonStdout bytes.Buffer
+	var observedStdout *countingWriter
 	root := newRootCmd(execStdout, stderr)
 	if args == nil {
 		args = []string{}
 	}
-	jsonExecution := shouldBufferJSONExecution(root, args)
-	if jsonExecution {
+	bufferJSONExecution := shouldBufferJSONExecution(root, args)
+	reportJSONFailure := shouldReportJSONExecutionError(root, args)
+	if bufferJSONExecution {
 		execStdout.target = &jsonStdout
+	} else if reportJSONFailure {
+		observedStdout = &countingWriter{target: stdout}
+		execStdout.target = observedStdout
 	}
 	root.SetArgs(args)
 	root.SetOut(execStdout)
@@ -140,7 +171,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if err := root.Execute(); err != nil {
 		code := commandExitCode(err)
-		if jsonExecution {
+		if bufferJSONExecution {
 			if len(bytes.TrimSpace(jsonStdout.Bytes())) > 0 {
 				if _, copyErr := io.Copy(stdout, &jsonStdout); copyErr != nil {
 					return 1
@@ -148,10 +179,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			} else {
 				_ = writeJSONFailure(stdout, "command_failed", commandFailureMessage(err), code)
 			}
+		} else if reportJSONFailure && observedStdout.BytesWritten() == 0 {
+			_ = writeJSONFailure(stdout, "command_failed", commandFailureMessage(err), code)
 		}
 		return code
 	}
-	if jsonExecution {
+	if bufferJSONExecution {
 		if _, err := io.Copy(stdout, &jsonStdout); err != nil {
 			return 1
 		}
@@ -217,6 +250,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newNudgeCmd(stdout, stderr),
 		newWaitCmd(stdout, stderr),
 		newAgentCmd(stdout, stderr),
+		newAgentScriptCmd(stdout, stderr),
 		newEventCmd(stdout, stderr),
 		newEventsCmd(stdout, stderr),
 		newTraceCmd(stdout, stderr),
@@ -224,6 +258,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newImportCmd(stdout, stderr),
 		newConfigCmd(stdout, stderr),
 		newPackCmd(stdout, stderr),
+		newLintCmd(stdout, stderr),
 		newDoctorCmd(stdout, stderr),
 		newHookCmd(stdout, stderr),
 		newSlingCmd(stdout, stderr),
@@ -237,7 +272,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newSkillCmd(stdout, stderr),
 		newMcpCmd(stdout, stderr),
 		newInternalCmd(stdout, stderr),
-		newVersionCmd(stdout),
+		newVersionCmd(stdout, stderr),
 		newDashboardCmd(stdout, stderr),
 		newGraphCmd(stdout, stderr),
 		newRegisterCmd(stdout, stderr),
@@ -411,10 +446,11 @@ func resolveCommandCity(args []string) (string, error) {
 //  4. Explicit city env (GC_CITY / GC_CITY_PATH / GC_CITY_ROOT) + GC_RIG
 //  5. Explicit city env only (city set, rig from GC_DIR/cwd if applicable)
 //  6. GC_RIG only (rig from registered city site bindings)
-//  7. GC_DIR-derived city path
-//  8. Registered rig binding lookup (cwd prefix match)
-//  9. Walk up from cwd looking for city.toml
-//  10. Fail
+//  7. Registered rig binding lookup using GC_DIR (rig with leftover .gc/)
+//  8. GC_DIR-derived city path (walk-up)
+//  9. Registered rig binding lookup (cwd prefix match)
+//  10. Walk up from cwd looking for city.toml
+//  11. Fail
 func resolveContext() (resolvedContext, error) {
 	city := cityFlag
 	rig := rigFlag
@@ -468,13 +504,36 @@ func resolveContext() (resolvedContext, error) {
 		return ctx, nil
 	}
 
-	// Step 7: GC_DIR-derived city path.
+	// Step 7: Registered rig binding lookup using GC_DIR. Must run before
+	// the GC_DIR walkup (step 8) so that a rig dir with a leftover ".gc/"
+	// runtime artifact does not get mistaken for a legacy city via
+	// findCity's HasRuntimeRoot fallback. Spawned rig agents have GC_DIR
+	// set to the rig path; when that path is a sibling of the city
+	// (e.g. rig at /Code/rigname and city at /Code/cityname), the walkup
+	// never reaches the real city and the stale ".gc/" inside the rig
+	// would otherwise win.
+	//
+	// Guard: only run the (potentially expensive) registry scan when GC_DIR
+	// actually shows the legacy-fallback misfire shape — a .gc/ directory
+	// without a sibling city.toml. When GC_DIR carries its own city.toml
+	// the walkup at step 8 finds the right city in O(1) and we don't pay
+	// for a full registry scan. When GC_DIR has neither, step 9 (cwd-based
+	// rig lookup) covers it.
+	if gcDir := strings.TrimSpace(os.Getenv("GC_DIR")); gcDir != "" {
+		if citylayout.HasRuntimeRoot(gcDir) && !citylayout.HasCityConfig(gcDir) {
+			if ctx, ok := lookupRigFromCwd(gcDir); ok {
+				return ctx, nil
+			}
+		}
+	}
+
+	// Step 8: GC_DIR-derived city path.
 	if gcDirCity, ok := resolveCityPathFromGCDir(); ok {
 		rn := rigFromCwdDir(gcDirCity, strings.TrimSpace(os.Getenv("GC_DIR")))
 		return resolvedContext{CityPath: gcDirCity, RigName: rn}, nil
 	}
 
-	// Step 8: Registered rig binding lookup (cwd prefix match).
+	// Step 9: Registered rig binding lookup (cwd prefix match).
 	cwd, err := os.Getwd()
 	if err != nil {
 		return resolvedContext{}, err
@@ -483,7 +542,7 @@ func resolveContext() (resolvedContext, error) {
 		return ctx, nil
 	}
 
-	// Step 9: Walk up from cwd looking for city.toml.
+	// Step 10: Walk up from cwd looking for city.toml.
 	cityPath, err := findCity(cwd)
 	if err != nil {
 		return resolvedContext{}, err
@@ -874,9 +933,11 @@ func openCityStoreWithPath(stderr io.Writer, cmdName string) (beads.Store, strin
 
 // openCityStoreAt opens a bead store at the given city path.
 // Used by the controller (which already knows the city path) and by
-// openCityStore (which resolves the path first).
+// openCityStore (which resolves the path first). Keep the passed city path
+// authoritative; rerouting through cityForStoreDir would let inherited
+// GC_CITY override an explicit --city resolution.
 func openCityStoreAt(cityPath string) (beads.Store, error) {
-	return openStoreAtForCity(cityPath, cityForStoreDir(cityPath))
+	return openStoreAtForCity(cityPath, cityPath)
 }
 
 const fileStoreLayoutScopedV1 = "scope-local-v1"
