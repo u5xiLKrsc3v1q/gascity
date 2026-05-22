@@ -169,6 +169,9 @@ func sessionWithinDesiredConfig(session beads.Bead, cfg *config.City, poolDesire
 }
 
 func sessionStartRequested(session beads.Bead, clk clock.Clock) bool {
+	if strings.TrimSpace(session.Metadata["state"]) == string(sessionpkg.StateStartPending) {
+		return true
+	}
 	if strings.TrimSpace(session.Metadata["pending_create_claim"]) == "true" {
 		return true
 	}
@@ -190,6 +193,8 @@ func sessionMetadataState(session beads.Bead) string {
 	switch state := strings.TrimSpace(session.Metadata["state"]); state {
 	case "awake":
 		return "active"
+	case string(sessionpkg.StateStartPending):
+		return "creating"
 	case "drained":
 		return "asleep"
 	default:
@@ -945,7 +950,7 @@ func healStatePatch(session beads.Bead, alive bool, clk clock.Clock) map[string]
 		if alive {
 			target = string(sessionpkg.StateAwake)
 		} else if sessionStartRequested(session, clk) {
-			target = string(sessionpkg.StateCreating)
+			target = string(sessionpkg.StateStartPending)
 		}
 	}
 	// failed-create is a terminal rollback marker written by
@@ -1142,6 +1147,7 @@ var knownSessionStates = map[string]bool{
 	"orphaned":                           true,
 	"closed":                             true,
 	"quarantined":                        true,
+	string(sessionpkg.StateStartPending): true,
 	"creating":                           true,
 	"drained":                            true,
 	string(sessionpkg.StateFailedCreate): true, // processed so skip/orphan-close can release the slot

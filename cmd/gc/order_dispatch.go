@@ -55,7 +55,9 @@ const (
 
 	completedOrderTrackingCloseReason = "order dispatch completed: tracking bead lifecycle finished"
 
-	orderTrackingHistoryIndexLimit = 2048
+	orderTrackingHistoryIndexLimit   = 2048
+	defaultMaxOrderDispatchesPerTick = 4
+	orderTrackingSweepCloseBudget    = 4
 )
 
 // orderDispatcher evaluates order trigger conditions and dispatches due
@@ -144,17 +146,19 @@ type orderStoreFunc func(execStoreTarget) (beads.Store, error)
 // ctx OR dispatchCtx is done (see launchDispatchOne). cancel() cancels
 // dispatchCtx.
 type memoryOrderDispatcher struct {
-	aa           []orders.Order
-	storeFn      orderStoreFunc
-	ep           events.Provider
-	execRun      ExecRunner
-	rec          events.Recorder
-	stderr       io.Writer
-	maxTimeout   time.Duration
-	cfg          *config.City
-	cityName     string
-	cacheMu      sync.Mutex
-	lastRunCache map[string]time.Time
+	aa                   []orders.Order
+	storeFn              orderStoreFunc
+	ep                   events.Provider
+	execRun              ExecRunner
+	rec                  events.Recorder
+	stderr               io.Writer
+	maxTimeout           time.Duration
+	maxDispatchesPerTick int
+	nextDispatchStart    int
+	cfg                  *config.City
+	cityName             string
+	cacheMu              sync.Mutex
+	lastRunCache         map[string]time.Time
 
 	dispatchCtx    context.Context
 	dispatchCancel context.CancelFunc
@@ -215,15 +219,16 @@ func buildOrderDispatcher(cityPath string, cfg *config.City, rec events.Recorder
 		storeFn: func(target execStoreTarget) (beads.Store, error) {
 			return openStoreAtForCity(target.ScopeRoot, cityPath)
 		},
-		ep:             ep,
-		execRun:        shellExecRunner,
-		rec:            rec,
-		stderr:         lockedStderr(stderr),
-		maxTimeout:     cfg.Orders.MaxTimeoutDuration(),
-		cfg:            cfg,
-		cityName:       loadedCityName(cfg, cityPath),
-		dispatchCtx:    dispatchCtx,
-		dispatchCancel: dispatchCancel,
+		ep:                   ep,
+		execRun:              shellExecRunner,
+		rec:                  rec,
+		stderr:               lockedStderr(stderr),
+		maxTimeout:           cfg.Orders.MaxTimeoutDuration(),
+		maxDispatchesPerTick: defaultMaxOrderDispatchesPerTick,
+		cfg:                  cfg,
+		cityName:             loadedCityName(cfg, cityPath),
+		dispatchCtx:          dispatchCtx,
+		dispatchCancel:       dispatchCancel,
 	}
 }
 
@@ -235,8 +240,20 @@ func (m *memoryOrderDispatcher) dispatch(ctx context.Context, cityPath string, n
 
 	stores := make(map[string]beads.Store)
 	trackingIndex := newOrderDispatchTrackingIndex()
+	dispatched := 0
 
-	for _, a := range m.aa {
+	total := len(m.aa)
+	if total == 0 {
+		return
+	}
+	start := 0
+	if m.maxDispatchesPerTick > 0 {
+		start = m.nextDispatchStart % total
+	}
+
+	for offset := 0; offset < total; offset++ {
+		idx := (start + offset) % total
+		a := m.aa[idx]
 		// Skip orders targeting suspended rigs.
 		if m.orderRigSuspended(a) {
 			continue
@@ -382,9 +399,15 @@ func (m *memoryOrderDispatcher) dispatch(ctx context.Context, cityPath string, n
 		// Fire with timeout; inflight tracks the spawned goroutine so
 		// drain can wait for tracking-bead outcome persistence before
 		// controller exit or config reload.
-		a := a // capture loop variable
 		m.addInflight()
 		m.launchDispatchOne(ctx, store, target, a, cityPath, trackingBead.ID)
+		dispatched++
+		if m.maxDispatchesPerTick > 0 {
+			m.nextDispatchStart = (idx + 1) % total
+		}
+		if m.maxDispatchesPerTick > 0 && dispatched >= m.maxDispatchesPerTick {
+			return
+		}
 	}
 }
 
@@ -1084,6 +1107,10 @@ func (m *memoryOrderDispatcher) hasOpenWorkInStoresStrict(stores []beads.Store, 
 // behind by a previous controller instance. Returns the count of beads
 // closed. This is non-fatal: dispatch proceeds even if the sweep fails.
 func sweepOrphanedOrderTracking(store beads.Store) (int, error) {
+	return sweepOrphanedOrderTrackingLimit(store, 0)
+}
+
+func sweepOrphanedOrderTrackingLimit(store beads.Store, limit int) (int, error) {
 	// ListByLabel without IncludeClosed returns only open beads.
 	// New tracking beads live in the wisps tier, but legacy issues-tier
 	// tracking beads may still exist after upgrade; sweep both.
@@ -1100,6 +1127,9 @@ func sweepOrphanedOrderTracking(store beads.Store) (int, error) {
 			continue
 		}
 		ids = append(ids, b.ID)
+		if limit > 0 && len(ids) >= limit {
+			break
+		}
 	}
 	if len(ids) == 0 {
 		return 0, nil
@@ -1126,6 +1156,10 @@ func beadLabelsContain(labels []string, want string) bool {
 // timestamp is older than staleAfter. When onlyOrders is non-empty, it only
 // closes tracking beads for those scoped order names.
 func sweepStaleOrderTracking(store beads.Store, now time.Time, staleAfter time.Duration, onlyOrders map[string]struct{}, initiator string) (int, error) {
+	return sweepStaleOrderTrackingLimit(store, now, staleAfter, onlyOrders, initiator, 0)
+}
+
+func sweepStaleOrderTrackingLimit(store beads.Store, now time.Time, staleAfter time.Duration, onlyOrders map[string]struct{}, initiator string, limit int) (int, error) {
 	if staleAfter <= 0 {
 		return 0, fmt.Errorf("stale-after must be positive")
 	}
@@ -1150,6 +1184,9 @@ func sweepStaleOrderTracking(store beads.Store, now time.Time, staleAfter time.D
 			continue
 		}
 		ids = append(ids, b.ID)
+		if limit > 0 && len(ids) >= limit {
+			break
+		}
 	}
 	if len(ids) == 0 {
 		return 0, nil
@@ -1188,6 +1225,10 @@ func orderNameFromTrackingBead(b beads.Bead) (string, bool) {
 // beads (see internal/beads/beads.go). The wrapper sleeps for up to
 // attempts*backoff in the worst case.
 func sweepOrphanedOrderTrackingRetry(store beads.Store, attempts int, backoff time.Duration) (int, error) { //nolint:unparam // attempts is configurable for testability
+	return sweepOrphanedOrderTrackingRetryLimit(store, attempts, backoff, 0)
+}
+
+func sweepOrphanedOrderTrackingRetryLimit(store beads.Store, attempts int, backoff time.Duration, limit int) (int, error) { //nolint:unparam // attempts is configurable for testability
 	if attempts <= 0 {
 		attempts = 1
 	}
@@ -1195,7 +1236,7 @@ func sweepOrphanedOrderTrackingRetry(store beads.Store, attempts int, backoff ti
 	var err error
 	for i := range attempts {
 		var n int
-		n, err = sweepOrphanedOrderTracking(store)
+		n, err = sweepOrphanedOrderTrackingLimit(store, limit)
 		total += n
 		if err == nil {
 			return total, nil

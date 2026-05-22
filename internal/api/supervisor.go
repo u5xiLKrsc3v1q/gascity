@@ -357,6 +357,7 @@ func allStartupPhases() []string {
 		"starting_bead_store",
 		"resolving_formulas",
 		"adopting_sessions",
+		"reconciling_sessions",
 		"starting_agents",
 	}
 }

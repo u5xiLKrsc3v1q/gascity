@@ -1457,8 +1457,11 @@ func TestEffectiveWorkQueryDefault(t *testing.T) {
 	a := Agent{Name: "mayor"}
 	got := a.EffectiveWorkQuery()
 	// Tiered query: check that tier 3 (routed_to) and tier 1-2 (assignee resolution) are present.
-	if !strings.Contains(got, "bd ready --include-ephemeral --metadata-field gc.routed_to=mayor --unassigned --exclude-type=epic --json --limit=1") {
+	if !strings.Contains(got, "bd ready --include-ephemeral --metadata-field gc.routed_to=mayor --unassigned --exclude-type=epic --sort oldest --json --limit=0") {
 		t.Errorf("EffectiveWorkQuery() missing tier 3 routed_to: %q", got)
+	}
+	if !strings.Contains(got, `jq -c "sort_by((.priority // 3), .created_at, .id) | .[:1]"`) {
+		t.Errorf("EffectiveWorkQuery() missing cross-tier fair ready selector: %q", got)
 	}
 	if gotCount := strings.Count(got, "bd ready --include-ephemeral"); gotCount < 2 {
 		t.Errorf("EffectiveWorkQuery() = %q, want generated ready queries to include ephemeral work", got)
@@ -1480,7 +1483,7 @@ func TestEffectiveWorkQueryCustom(t *testing.T) {
 func TestEffectiveWorkQueryWithDir(t *testing.T) {
 	a := Agent{Name: "polecat", Dir: "hello-world"}
 	got := a.EffectiveWorkQuery()
-	if !strings.Contains(got, "bd ready --include-ephemeral --metadata-field gc.routed_to=hello-world/polecat --unassigned --exclude-type=epic --json --limit=1") {
+	if !strings.Contains(got, "bd ready --include-ephemeral --metadata-field gc.routed_to=hello-world/polecat --unassigned --exclude-type=epic --sort oldest --json --limit=0") {
 		t.Errorf("EffectiveWorkQuery() missing tier 3 routed_to: %q", got)
 	}
 }
@@ -1488,7 +1491,7 @@ func TestEffectiveWorkQueryWithDir(t *testing.T) {
 func TestEffectiveWorkQueryPoolDefault(t *testing.T) {
 	a := Agent{Name: "polecat", Dir: "hello-world", MinActiveSessions: ptrInt(1), MaxActiveSessions: ptrInt(3)}
 	got := a.EffectiveWorkQuery()
-	if !strings.Contains(got, "bd ready --include-ephemeral --metadata-field gc.routed_to=hello-world/polecat --unassigned --exclude-type=epic --json --limit=1") {
+	if !strings.Contains(got, "bd ready --include-ephemeral --metadata-field gc.routed_to=hello-world/polecat --unassigned --exclude-type=epic --sort oldest --json --limit=0") {
 		t.Errorf("EffectiveWorkQuery() missing tier 3 routed_to: %q", got)
 	}
 	if strings.Contains(got, "--type=molecule") {
@@ -1541,7 +1544,7 @@ func TestEffectiveWorkQueryPoolNameOverride(t *testing.T) {
 		PoolName: "hello-world/dog",
 	}
 	got := a.EffectiveWorkQuery()
-	if !strings.Contains(got, "bd ready --include-ephemeral --metadata-field gc.routed_to=hello-world/dog --unassigned --exclude-type=epic --json --limit=1") {
+	if !strings.Contains(got, "bd ready --include-ephemeral --metadata-field gc.routed_to=hello-world/dog --unassigned --exclude-type=epic --sort oldest --json --limit=0") {
 		t.Errorf("EffectiveWorkQuery() missing tier 3 routed_to with pool name: %q", got)
 	}
 	if strings.Contains(got, "--type=molecule") {
@@ -1552,7 +1555,7 @@ func TestEffectiveWorkQueryPoolNameOverride(t *testing.T) {
 func TestEffectiveWorkQueryPoolNoPoolName(t *testing.T) {
 	a := Agent{Name: "dog", Dir: "hello-world", MinActiveSessions: ptrInt(1), MaxActiveSessions: ptrInt(3)}
 	got := a.EffectiveWorkQuery()
-	if !strings.Contains(got, "bd ready --include-ephemeral --metadata-field gc.routed_to=hello-world/dog --unassigned --exclude-type=epic --json --limit=1") {
+	if !strings.Contains(got, "bd ready --include-ephemeral --metadata-field gc.routed_to=hello-world/dog --unassigned --exclude-type=epic --sort oldest --json --limit=0") {
 		t.Errorf("EffectiveWorkQuery() missing tier 3 routed_to: %q", got)
 	}
 }
@@ -1607,10 +1610,10 @@ func TestEffectiveWorkQueryControlDispatcherClaimsLegacyUnassignedRoute(t *testi
 	out := runEffectiveWorkQuery(t, a, nil, `#!/bin/sh
 set -eu
 case "$*" in
-  "ready --include-ephemeral --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --exclude-type=epic --json --limit=1")
+  "ready --include-ephemeral --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --exclude-type=epic --sort oldest --json --limit=0")
     printf '[]'
     ;;
-  "ready --include-ephemeral --metadata-field gc.routed_to=gascity/workflow-control --unassigned --exclude-type=epic --json --limit=1")
+  "ready --include-ephemeral --metadata-field gc.routed_to=gascity/workflow-control --unassigned --exclude-type=epic --sort oldest --json --limit=0")
     printf '[{"id":"ga-legacy-route"}]'
     ;;
   *)
@@ -1620,6 +1623,26 @@ esac
 `)
 	if got, want := strings.TrimSpace(out), `[{"id":"ga-legacy-route"}]`; got != want {
 		t.Fatalf("legacy routed work query output = %q, want %q", got, want)
+	}
+}
+
+func TestEffectiveWorkQueryRoutedQueuePicksOldestAcrossReadyTiers(t *testing.T) {
+	a := Agent{Name: "worker", Dir: "hello-world"}
+	out := runEffectiveWorkQuery(t, a, map[string]string{
+		"GC_SESSION_ORIGIN": "ephemeral",
+	}, `#!/bin/sh
+set -eu
+case "$*" in
+  "ready --include-ephemeral --metadata-field gc.routed_to=hello-world/worker --unassigned --exclude-type=epic --sort oldest --json --limit=0")
+    printf '[{"id":"newer-durable","priority":2,"created_at":"2026-05-20T15:21:59Z"},{"id":"older-no-history","priority":2,"created_at":"2026-05-20T06:09:30Z","no_history":true}]'
+    ;;
+  *)
+    printf '[]'
+    ;;
+esac
+`)
+	if got, want := strings.TrimSpace(out), `[{"id":"older-no-history","priority":2,"created_at":"2026-05-20T06:09:30Z","no_history":true}]`; got != want {
+		t.Fatalf("routed work query output = %q, want %q", got, want)
 	}
 }
 
@@ -1651,7 +1674,7 @@ func TestEffectiveWorkQueryExcludesEpics(t *testing.T) {
 	wantSnippets := []string{
 		`bd list --status in_progress --assignee="$id" --exclude-type=epic --json`,
 		`bd ready --include-ephemeral --assignee="$id" --exclude-type=epic --json`,
-		`bd ready --include-ephemeral --metadata-field gc.routed_to=hello-world/worker --unassigned --exclude-type=epic --json`,
+		`bd ready --include-ephemeral --metadata-field gc.routed_to=hello-world/worker --unassigned --exclude-type=epic --sort oldest --json`,
 	}
 	for _, want := range wantSnippets {
 		if !strings.Contains(got, want) {
@@ -1669,8 +1692,8 @@ func TestEffectiveWorkQueryExcludesEpicsControlDispatcher(t *testing.T) {
 	wantSnippets := []string{
 		`bd list --status in_progress --assignee="$cand" --exclude-type=epic --json`,
 		`bd ready --include-ephemeral --assignee="$cand" --exclude-type=epic --json`,
-		`bd ready --include-ephemeral --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --exclude-type=epic --json`,
-		`bd ready --include-ephemeral --metadata-field gc.routed_to=gascity/workflow-control --unassigned --exclude-type=epic --json`,
+		`bd ready --include-ephemeral --metadata-field gc.routed_to=gascity/control-dispatcher --unassigned --exclude-type=epic --sort oldest --json`,
+		`bd ready --include-ephemeral --metadata-field gc.routed_to=gascity/workflow-control --unassigned --exclude-type=epic --sort oldest --json`,
 	}
 	for _, want := range wantSnippets {
 		if !strings.Contains(got, want) {
@@ -1751,6 +1774,9 @@ func TestDefaultPoolCheckUsesBdReady(t *testing.T) {
 	}
 	if !strings.Contains(check, "bd ready --include-ephemeral") {
 		t.Errorf("EffectiveScaleCheck() = %q, want ephemeral ready work counted", check)
+	}
+	if !strings.Contains(check, "--exclude-type=epic") {
+		t.Errorf("EffectiveScaleCheck() = %q, should not count parent epics as demand", check)
 	}
 	if strings.Contains(check, "--type=molecule") {
 		t.Errorf("EffectiveScaleCheck() = %q, should not count molecule containers as demand", check)
@@ -1939,6 +1965,9 @@ func TestEffectiveScaleCheckDefaults(t *testing.T) {
 	if !strings.Contains(check, "--unassigned") {
 		t.Errorf("EffectiveScaleCheck = %q, want --unassigned for new unassigned demand", check)
 	}
+	if !strings.Contains(check, "--exclude-type=epic") {
+		t.Errorf("EffectiveScaleCheck = %q, should not count parent epics as demand", check)
+	}
 	if strings.Contains(check, "--type=molecule") || strings.Contains(check, "${molecules:-0}") {
 		t.Errorf("EffectiveScaleCheck = %q, should not count molecule containers as demand", check)
 	}
@@ -1960,6 +1989,9 @@ func TestEffectiveScaleCheckDefaultsQualified(t *testing.T) {
 	}
 	if !strings.Contains(check, "--unassigned") {
 		t.Errorf("EffectiveScaleCheck = %q, want --unassigned for new unassigned demand", check)
+	}
+	if !strings.Contains(check, "--exclude-type=epic") {
+		t.Errorf("EffectiveScaleCheck = %q, should not count parent epics as demand", check)
 	}
 	if strings.Contains(check, "--type=molecule") {
 		t.Errorf("EffectiveScaleCheck = %q, should not count molecule containers as demand", check)
@@ -4409,6 +4441,9 @@ func TestInjectImplicitAgents_NoProviders(t *testing.T) {
 	}
 	if !a.Implicit {
 		t.Fatal("control-dispatcher should be implicit")
+	}
+	if !reflect.DeepEqual(a.ProcessNames, []string{"gc"}) {
+		t.Fatalf("control-dispatcher ProcessNames = %v, want [gc]", a.ProcessNames)
 	}
 }
 

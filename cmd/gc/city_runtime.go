@@ -212,19 +212,6 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 
 	ensureManagedDoltPublishedForRuntime(p.CityPath, p.Stderr, logPrefix, managedDoltHealth, managedDoltOwned, managedDoltPort)
 
-	// Sweep orphaned order-tracking beads on startup only (not config reload).
-	// A previous controller instance may have left tracking beads open
-	// (goroutines killed on restart, or silent Close failures).
-	// Retry with backoff as defense-in-depth against transient store
-	// errors immediately after ensureBeadsProvider returns (#753).
-	if sweepStore, err := openStoreAtForCity(p.CityPath, p.CityPath); err != nil {
-		fmt.Fprintf(p.Stderr, "gc start: order tracking sweep: %v\n", err) //nolint:errcheck // best-effort stderr
-	} else if n, err := sweepOrphanedOrderTrackingRetry(sweepStore, 3, time.Second); err != nil {
-		fmt.Fprintf(p.Stderr, "gc start: order tracking sweep (closed %d): %v\n", n, err) //nolint:errcheck // best-effort stderr
-	} else if n > 0 {
-		fmt.Fprintf(p.Stderr, "gc start: closed %d orphaned order-tracking beads\n", n) //nolint:errcheck // best-effort stderr
-	}
-
 	od := buildOrderDispatcher(p.CityPath, p.Cfg, p.Rec, p.Stderr)
 
 	suspendedNames := computeSuspendedNames(p.Cfg, p.CityName, p.CityPath)
@@ -434,16 +421,6 @@ func (cr *CityRuntime) run(ctx context.Context) {
 		return
 	}
 
-	// Dispatch due orders before startup session reconciliation. A cold-start
-	// reconcile can take minutes when it has stale or config-drifted sessions;
-	// due event/condition formulas should not wait behind that maintenance work.
-	cr.safeTick(func() {
-		cr.dispatchOrders(ctx, cityRoot)
-	}, "startup-orders")
-	if ctx.Err() != nil {
-		return
-	}
-
 	// Session bead sync BEFORE reconciliation: ensures beads exist for
 	// the reconciler to read/write hashes. Uses ListByLabel (indexed,
 	// fast even before CachingStore is primed).
@@ -456,6 +433,9 @@ func (cr *CityRuntime) run(ctx context.Context) {
 	// ctx cancellation, or normal completion alike.
 	startupComplete := false
 	if !retryStartupStep("startup", func() bool { return startupComplete }, func() {
+		if cr.onStatus != nil {
+			cr.onStatus("reconciling_sessions")
+		}
 		cr.ensureManagedDoltPublishedForTick()
 		sessionBeads := cr.loadSessionBeadSnapshot()
 		startupTrace := cr.beginTraceCycle("startup", "initial_reconcile", sessionBeads)
@@ -466,14 +446,52 @@ func (cr *CityRuntime) run(ctx context.Context) {
 			}
 		}()
 
+		recordStartupPhaseBegin := func(site TraceSiteCode, name string, fields map[string]any) {
+			if startupTrace == nil {
+				return
+			}
+			phaseFields := map[string]any{
+				"operation_name": name,
+				"phase_stage":    "begin",
+			}
+			for k, v := range fields {
+				phaseFields[k] = v
+			}
+			startupTrace.RecordControllerDecision(site, TraceReasonRetained, TraceOutcomeApplied, phaseFields)
+			_ = startupTrace.flushCurrentBatch(TraceDurabilityMetadata)
+		}
+		recordStartupPhaseComplete := func(site TraceSiteCode, name string, start time.Time, fields map[string]any) {
+			if startupTrace != nil {
+				startupTrace.RecordControllerOperation(site, TraceReasonRetained, TraceOutcomeComplete, name, time.Since(start), fields)
+			}
+		}
+
+		phaseStart := time.Now()
+		recordStartupPhaseBegin(TraceSiteControllerTickPhase, "startup.cleanup_dead_runtime_session_corpses", traceSessionSnapshotFields(sessionBeads))
 		cleanupDeadRuntimeSessionCorpses(sessionBeads, cr.sessionDrains, cr.sp, cr.stderr)
+		recordStartupPhaseComplete(TraceSiteControllerTickPhase, "startup.cleanup_dead_runtime_session_corpses", phaseStart, traceSessionSnapshotFields(sessionBeads))
 		// Reap stale session beads from a previous run before building desired
 		// state, so desired state does not reference already-closed beads (#742).
-		if reapStaleSessionBeads(cr.cityBeadStore(), cr.sp, cr.sessionDrains, clock.Real{}, cr.stderr) > 0 {
+		phaseStart = time.Now()
+		recordStartupPhaseBegin(TraceSiteControllerTickPhase, "startup.reap_stale_session_beads", nil)
+		reaped := reapStaleSessionBeads(cr.cityBeadStore(), cr.rigBeadStores(), cr.sp, cr.sessionDrains, clock.Real{}, cr.stderr)
+		recordStartupPhaseComplete(TraceSiteControllerTickPhase, "startup.reap_stale_session_beads", phaseStart, map[string]any{"reaped": reaped})
+		if reaped > 0 {
+			phaseStart = time.Now()
+			recordStartupPhaseBegin(TraceSiteSessionSnapshot, "startup.load_session_snapshot.after_reap", nil)
 			sessionBeads = cr.loadSessionBeadSnapshot()
+			recordStartupPhaseComplete(TraceSiteSessionSnapshot, "startup.load_session_snapshot.after_reap", phaseStart, traceSessionSnapshotFields(sessionBeads))
 		}
+		phaseStart = time.Now()
+		recordStartupPhaseBegin(TraceSiteDesiredStateBuild, "startup.build_desired_state", traceSessionSnapshotFields(sessionBeads))
 		result := cr.buildDesiredState(sessionBeads, startupTrace)
+		recordStartupPhaseComplete(TraceSiteDesiredStateBuild, "startup.build_desired_state", phaseStart, traceDesiredStateFields(result))
+		phaseStart = time.Now()
+		recordStartupPhaseBegin(TraceSiteSessionSnapshot, "startup.load_session_snapshot.after_build", nil)
 		sessionBeads = cr.loadSessionBeadSnapshot()
+		recordStartupPhaseComplete(TraceSiteSessionSnapshot, "startup.load_session_snapshot.after_build", phaseStart, traceSessionSnapshotFields(sessionBeads))
+		phaseStart = time.Now()
+		recordStartupPhaseBegin(TraceSiteDesiredStateBuild, "startup.refresh_desired_state.before_sync", traceDesiredStateFields(result))
 		result = refreshDesiredStateWithSessionBeads(
 			result,
 			cr.cityName,
@@ -484,7 +502,13 @@ func (cr *CityRuntime) run(ctx context.Context) {
 			sessionBeads,
 			cr.stderr,
 		)
+		recordStartupPhaseComplete(TraceSiteDesiredStateBuild, "startup.refresh_desired_state.before_sync", phaseStart, traceDesiredStateFields(result))
+		phaseStart = time.Now()
+		recordStartupPhaseBegin(TraceSiteSessionSync, "startup.sync_beads_and_update_index", traceDesiredStateFields(result))
 		sessionBeads = cr.syncBeadsAndUpdateIndex(result.State, sessionBeads)
+		recordStartupPhaseComplete(TraceSiteSessionSync, "startup.sync_beads_and_update_index", phaseStart, traceSessionSnapshotFields(sessionBeads))
+		phaseStart = time.Now()
+		recordStartupPhaseBegin(TraceSiteDesiredStateBuild, "startup.refresh_desired_state.after_sync", traceDesiredStateFields(result))
 		result = refreshDesiredStateWithSessionBeads(
 			result,
 			cr.cityName,
@@ -495,18 +519,35 @@ func (cr *CityRuntime) run(ctx context.Context) {
 			sessionBeads,
 			cr.stderr,
 		)
+		recordStartupPhaseComplete(TraceSiteDesiredStateBuild, "startup.refresh_desired_state.after_sync", phaseStart, traceDesiredStateFields(result))
 		if ctx.Err() != nil {
 			return
 		}
 
 		if cr.sessionDrains != nil {
+			phaseStart = time.Now()
+			recordStartupPhaseBegin(TraceSiteControllerTickPhase, "startup.bead_reconcile_tick", traceDesiredStateFields(result))
 			cr.beadReconcileTick(ctx, result, sessionBeads, startupTrace)
+			recordStartupPhaseComplete(TraceSiteControllerTickPhase, "startup.bead_reconcile_tick", phaseStart, traceDesiredStateFields(result))
 		}
 		completion = TraceCompletionCompleted
 		startupComplete = true
 	}) {
 		return
 	}
+	if ctx.Err() != nil {
+		return
+	}
+
+	// Dispatch due orders after startup session reconciliation. Order
+	// tracking work can always roll forward on the next tick; session
+	// lifecycle needs this startup pass to make progress first.
+	cr.safeTick(func() {
+		if cr.onStatus != nil {
+			cr.onStatus("dispatching_orders")
+		}
+		cr.dispatchOrders(ctx, cityRoot)
+	}, "startup-orders")
 	if ctx.Err() != nil {
 		return
 	}
@@ -824,17 +865,6 @@ func (cr *CityRuntime) tick(
 		return
 	}
 
-	// Order dispatch is intentionally before the expensive session reconcile
-	// phases so due formulas are not starved by slow startup/config drift work,
-	// but after the pressure gate and managed-Dolt preflight so skipped or
-	// endpoint-repair ticks do not add tracking writes first.
-	phaseStart = time.Now()
-	cr.dispatchOrders(ctx, cityRoot)
-	recordPhase(TraceSiteOrderDispatch, "dispatch_orders", phaseStart, nil)
-	if ctx.Err() != nil {
-		return
-	}
-
 	phaseStart = time.Now()
 	sessionBeads := cr.loadSessionBeadSnapshot()
 	recordPhase(TraceSiteSessionSnapshot, "load_session_snapshot.initial", phaseStart, traceSessionSnapshotFields(sessionBeads))
@@ -853,7 +883,7 @@ func (cr *CityRuntime) tick(
 	// so stale names cannot block desired-state computation (#742).
 	phaseStart = time.Now()
 	cleanupDeadRuntimeSessionCorpses(sessionBeads, cr.sessionDrains, cr.sp, cr.stderr)
-	reaped := reapStaleSessionBeads(cr.cityBeadStore(), cr.sp, cr.sessionDrains, clock.Real{}, cr.stderr)
+	reaped := reapStaleSessionBeads(cr.cityBeadStore(), cr.rigBeadStores(), cr.sp, cr.sessionDrains, clock.Real{}, cr.stderr)
 	recordPhase(TraceSiteControllerTickPhase, "cleanup_dead_and_stale_sessions", phaseStart, map[string]any{"reaped": reaped})
 	if reaped > 0 {
 		phaseStart = time.Now()
@@ -952,6 +982,16 @@ func (cr *CityRuntime) tick(
 		cr.beadReconcileTick(ctx, result, sessionBeads, trace)
 		recordPhase(TraceSiteControllerTickPhase, "bead_reconcile_tick", phaseStart, traceDesiredStateFields(result))
 	}
+	if ctx.Err() != nil {
+		return
+	}
+
+	phaseStart = time.Now()
+	cr.dispatchOrders(ctx, cityRoot)
+	recordPhase(TraceSiteOrderDispatch, "dispatch_orders", phaseStart, nil)
+	if ctx.Err() != nil {
+		return
+	}
 
 	// Wisp GC: purge expired closed molecules.
 	if store := cr.cityBeadStore(); cr.wg != nil && store != nil && cr.wg.shouldRun(time.Now()) {
@@ -1023,7 +1063,7 @@ func (cr *CityRuntime) runOrderTrackingSweepWatchdog(now time.Time) {
 	onlyOrders := map[string]struct{}{
 		orderTrackingSweepOrder: {},
 	}
-	n, err := sweepStaleOrderTracking(store, now, orderTrackingSweepWatchdogStaleAfter, onlyOrders, orderTrackingWatchdogMetadataInitiator)
+	n, err := sweepStaleOrderTrackingLimit(store, now, orderTrackingSweepWatchdogStaleAfter, onlyOrders, orderTrackingWatchdogMetadataInitiator, orderTrackingSweepCloseBudget)
 	if err != nil {
 		if cr.stderr != nil {
 			fmt.Fprintf(cr.stderr, "%s: order tracking sweep watchdog: %v\n", cr.logPrefix, err) //nolint:errcheck // best-effort stderr
@@ -1973,12 +2013,16 @@ func sweepUndesiredPoolSessionBeads(
 		if agentCfg == nil || !isEphemeralSessionBead(bead) {
 			continue
 		}
-		if running, err := poolSessionBeadRuntimeRunning(bead, sp); err == nil && running {
+		running, err := poolSessionBeadRuntimeRunning(bead, sp)
+		if err != nil {
+			continue
+		}
+		if running {
 			continue
 		}
 		candidates = append(candidates, bead)
 	}
-	return len(GCSweepSessionBeads(store, rigStores, candidates))
+	return len(GCSweepStoppedSessionBeads(store, rigStores, candidates))
 }
 
 func poolSessionBeadRuntimeRunning(bead beads.Bead, sp runtime.Provider) (bool, error) {

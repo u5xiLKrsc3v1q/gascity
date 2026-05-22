@@ -2579,8 +2579,7 @@ func (a *Agent) EffectiveWorkQuery() string {
 			`ephemeral|"") ;; ` +
 			`*) exit 0 ;; ` +
 			`esac; ` +
-			`r=$(bd ready --include-ephemeral --metadata-field gc.routed_to=` + target +
-			` --unassigned --exclude-type=epic --json --limit=1 2>/dev/null); ` +
+			`r=$(` + routedReadyTierCommand(target) + `); ` +
 			`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 			`printf "[]"'`
 	}
@@ -2614,11 +2613,16 @@ func (a *Agent) EffectiveWorkQuery() string {
 		`ephemeral|"") ;; ` +
 		`*) exit 0 ;; ` +
 		`esac; ` +
-		`r=$(bd ready --include-ephemeral --metadata-field gc.routed_to=` + target +
-		` --unassigned --exclude-type=epic --json --limit=1 2>/dev/null); ` +
+		`r=$(` + routedReadyTierCommand(target) + `); ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
-		`bd ready --include-ephemeral --metadata-field gc.routed_to=` + legacyTarget +
-		` --unassigned --exclude-type=epic --json --limit=1 2>/dev/null'`
+		`r=$(` + routedReadyTierCommand(legacyTarget) + `); ` +
+		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
+		`printf "[]"'`
+}
+
+func routedReadyTierCommand(target string) string {
+	return `bd ready --include-ephemeral --metadata-field gc.routed_to=` + target +
+		` --unassigned --exclude-type=epic --sort oldest --json --limit=0 2>/dev/null | jq -c "sort_by((.priority // 3), .created_at, .id) | .[:1]"`
 }
 
 func legacyWorkflowControlQualifiedName(target string) string {
@@ -2690,7 +2694,7 @@ func (a *Agent) EffectiveScaleCheck() string {
 	}
 	template := a.QualifiedName()
 	return `ready_json=$(bd ready --include-ephemeral --metadata-field gc.routed_to=` + template +
-		` --unassigned --limit 0 --json) && printf '%s\n' "$ready_json" | jq 'length'`
+		` --unassigned --exclude-type=epic --limit 0 --json) && printf '%s\n' "$ready_json" | jq 'length'`
 }
 
 // EffectiveMaxActiveSessions returns the agent's max active sessions.
@@ -3149,6 +3153,7 @@ func newControlDispatcherAgent(dir string) Agent {
 		Dir:               dir,
 		Description:       "Built-in deterministic graph.v2 workflow control worker",
 		StartCommand:      ControlDispatcherStartCommandFor(qualifiedName),
+		ProcessNames:      []string{"gc"},
 		MaxActiveSessions: &one,
 		Implicit:          true,
 	}

@@ -224,9 +224,12 @@ type startExecutionOptions struct {
 	asyncLimiter    *asyncStartLimiter
 	asyncTracker    *asyncStartTracker
 	maxSessionAgeTr maxSessionAgeTracker
+	workDirResolver taskWorkDirResolver
 }
 
 type startExecutionOption func(*startExecutionOptions)
+
+type taskWorkDirResolver func(startCandidate, *config.City) string
 
 func withAsyncStartExecution() startExecutionOption {
 	return func(opts *startExecutionOptions) {
@@ -257,6 +260,12 @@ func withAsyncStartTracker(tracker *asyncStartTracker) startExecutionOption {
 func withMaxSessionAgeTracker(tr maxSessionAgeTracker) startExecutionOption {
 	return func(opts *startExecutionOptions) {
 		opts.maxSessionAgeTr = tr
+	}
+}
+
+func withTaskWorkDirResolver(resolver taskWorkDirResolver) startExecutionOption {
+	return func(opts *startExecutionOptions) {
+		opts.workDirResolver = resolver
 	}
 }
 
@@ -641,13 +650,18 @@ func prepareStartCandidateForCity(
 	store beads.Store,
 	clk clock.Clock,
 	stderr io.Writer,
+	workDirResolvers ...taskWorkDirResolver,
 ) (*preparedStart, error) {
 	session := candidate.session
-	if _, _, err := preWakeCommit(session, store, clk); err != nil {
+	if _, _, err := preWakeCommit(session, store, clk, startLaunchMetadataPatch(session.Metadata, candidate.tp)); err != nil {
 		return nil, err
 	}
 	candidate = refreshConfiguredNamedStartCandidate(candidate, cityPath, cityName, cfg, sp, store, clk, stderr)
-	return buildPreparedStart(candidate, cfg, store)
+	var workDirResolver taskWorkDirResolver
+	if len(workDirResolvers) > 0 {
+		workDirResolver = workDirResolvers[0]
+	}
+	return buildPreparedStartWithWorkDirResolver(candidate, cfg, store, workDirResolver)
 }
 
 func refreshConfiguredNamedStartCandidate(
@@ -689,6 +703,15 @@ func buildPreparedStart(
 	cfg *config.City,
 	store beads.Store,
 ) (*preparedStart, error) {
+	return buildPreparedStartWithWorkDirResolver(candidate, cfg, store, nil)
+}
+
+func buildPreparedStartWithWorkDirResolver(
+	candidate startCandidate,
+	cfg *config.City,
+	store beads.Store,
+	workDirResolver taskWorkDirResolver,
+) (*preparedStart, error) {
 	session := candidate.session
 	tp := candidate.tp
 	agentCfg := templateParamsToConfig(tp)
@@ -728,7 +751,7 @@ func buildPreparedStart(
 	coreHash := runtime.CoreFingerprint(agentCfg)
 	coreBreakdown := runtime.CoreFingerprintBreakdown(agentCfg)
 	liveHash := runtime.LiveFingerprint(agentCfg)
-	if wd := resolveTaskWorkDir(store, session.ID, candidate.name(), strings.TrimSpace(session.Metadata["alias"]), candidate.logicalTemplate(cfg)); wd != "" {
+	if wd := resolvePreparedTaskWorkDir(candidate, cfg, store, workDirResolver); wd != "" {
 		agentCfg.WorkDir = wd
 	} else if wd := session.Metadata["work_dir"]; wd != "" {
 		agentCfg.WorkDir = wd
@@ -759,9 +782,15 @@ func buildPreparedStart(
 	if !firstStart && !forceFresh && hasResumeKey {
 		agentCfg.PromptSuffix = ""
 		agentCfg.PromptFlag = ""
-		agentCfg.Nudge = tp.Hints.Nudge
+		agentCfg.Nudge = restartPromptNudge(tp.Prompt, tp.Hints.Nudge)
 		if agentCfg.Env != nil {
 			delete(agentCfg.Env, startupPromptDeliveredEnv)
+		}
+		if strings.TrimSpace(tp.Prompt) != "" {
+			if agentCfg.Env == nil {
+				agentCfg.Env = map[string]string{}
+			}
+			agentCfg.Env[startupPromptDeliveredEnv] = "1"
 		}
 	}
 	// Initial message: append to prompt on first start only.
@@ -832,6 +861,31 @@ func buildPreparedStart(
 		coreBreakdown: coreBreakdown,
 		liveHash:      liveHash,
 	}, nil
+}
+
+func resolvePreparedTaskWorkDir(
+	candidate startCandidate,
+	cfg *config.City,
+	store beads.Store,
+	workDirResolver taskWorkDirResolver,
+) string {
+	if workDirResolver != nil {
+		return workDirResolver(candidate, cfg)
+	}
+	return resolveTaskWorkDir(store, taskWorkDirAssignees(candidate, cfg)...)
+}
+
+func taskWorkDirAssignees(candidate startCandidate, cfg *config.City) []string {
+	if candidate.session == nil {
+		return nil
+	}
+	session := candidate.session
+	return []string{
+		session.ID,
+		candidate.name(),
+		strings.TrimSpace(session.Metadata["alias"]),
+		candidate.logicalTemplate(cfg),
+	}
 }
 
 func executePreparedStartWave(
@@ -1025,6 +1079,13 @@ func appendInitialMessageToStartupNudge(nudge, msg string) string {
 		return nudge + startupPromptNudgeSeparator + userMessage
 	}
 	return userMessage
+}
+
+func restartPromptNudge(prompt, nudge string) string {
+	if strings.TrimSpace(prompt) == "" {
+		return nudge
+	}
+	return prependStartupPromptToNudge(prompt, nudge)
 }
 
 func startupRateLimitScreenDetected(
@@ -1410,14 +1471,14 @@ func commitStartResult(
 
 // confirmPendingStart reports whether a session in the given metadata
 // state should be transitioned to "active" after a successful runtime
-// spawn. Empty, "creating", "asleep", and "drained" all indicate the
+// spawn. Empty, "start-pending", "creating", "asleep", and "drained" all indicate the
 // session was pending a spawn; "awake" is treated by the reconciler as
 // equivalent to "active" and is intentionally NOT restamped (a no-op
 // metadata write on every spawn). Any other state ("draining",
 // "archived", "quarantined", ...) is left alone.
 func confirmPendingStart(currentState string) bool {
 	switch sessionpkg.State(strings.TrimSpace(currentState)) {
-	case "", sessionpkg.StateCreating, sessionpkg.StateAsleep, sessionpkg.State("drained"):
+	case "", sessionpkg.StateStartPending, sessionpkg.StateCreating, sessionpkg.StateAsleep, sessionpkg.State("drained"):
 		return true
 	}
 	return false
@@ -1498,6 +1559,8 @@ func commitStartResultTraced(
 	if bdj, err := json.Marshal(result.prepared.coreBreakdown); err == nil {
 		coreBreakdown = string(bdj)
 	}
+	clearPendingCreate := shouldRollbackPendingCreate(session) ||
+		strings.TrimSpace(session.Metadata["pending_create_started_at"]) != ""
 	// Transition creating/asleep/drained beads to active once the runtime
 	// spawn has confirmed. Folded into this metadata batch so the state
 	// write is atomic with the hash writes, the pending_create_claim
@@ -1511,7 +1574,7 @@ func commitStartResultTraced(
 		CoreBreakdown:           coreBreakdown,
 		ConfirmState:            confirmPendingStart(session.Metadata["state"]),
 		ClearSleepReason:        session.Metadata["sleep_reason"] != "",
-		ClearPendingCreateClaim: shouldRollbackPendingCreate(session),
+		ClearPendingCreateClaim: clearPendingCreate,
 		Now:                     clk.Now(),
 	})
 	storedMCPSnapshot, err := sessionpkg.EncodeMCPServersSnapshot(result.prepared.cfg.MCPServers)
@@ -1684,45 +1747,46 @@ func runningSessionMatchesPendingCreate(session *beads.Bead, sessionName string,
 }
 
 func rollbackPendingCreate(session *beads.Bead, store beads.Store, now time.Time, stderr io.Writer) {
-	if session == nil || store == nil {
-		return
-	}
-	clearPendingStartInFlightLease(session, store, stderr)
-	if strings.TrimSpace(session.Metadata["session_name_explicit"]) == "true" {
-		if setMeta(store, session.ID, "session_name", "", stderr) == nil {
-			if session.Metadata == nil {
-				session.Metadata = make(map[string]string)
-			}
-			session.Metadata["session_name"] = ""
-		}
-	}
-	closeBead(store, session.ID, string(sessionpkg.StateFailedCreate), now, stderr)
+	rollbackPendingCreateWithTerminalPatch(session, store, now, stderr)
 }
 
 func rollbackPendingCreateClearingClaim(session *beads.Bead, store beads.Store, now time.Time, stderr io.Writer) {
 	if session == nil || store == nil {
 		return
 	}
-	clearPendingStartInFlightLease(session, store, stderr)
-	if strings.TrimSpace(session.Metadata["session_name_explicit"]) == "true" {
-		if setMeta(store, session.ID, "session_name", "", stderr) == nil {
-			if session.Metadata == nil {
-				session.Metadata = make(map[string]string)
-			}
-			session.Metadata["session_name"] = ""
-		}
+	rollbackPendingCreateWithTerminalPatch(session, store, now, stderr)
+}
+
+func rollbackPendingCreateWithTerminalPatch(session *beads.Bead, store beads.Store, now time.Time, stderr io.Writer) {
+	if session == nil || store == nil {
+		return
 	}
-	if !closeFailedCreateBead(store, session.ID, now, stderr) {
+	if session.Status == "closed" {
+		return
+	}
+	patch := sessionpkg.ClosePatch(now.UTC(), string(sessionpkg.StateFailedCreate))
+	patch["pending_create_claim"] = ""
+	patch["pending_create_started_at"] = ""
+	patch["sleep_intent"] = ""
+	patch["last_woke_at"] = ""
+	if strings.TrimSpace(session.Metadata["session_name_explicit"]) == "true" {
+		patch["session_name"] = ""
+	}
+	if setMetaBatch(store, session.ID, patch, stderr) != nil {
+		return
+	}
+	if err := store.Close(session.ID); err != nil {
+		fmt.Fprintf(stderr, "session beads: closing failed-create bead %s: %v\n", session.ID, err) //nolint:errcheck
 		return
 	}
 	if session.Metadata == nil {
 		session.Metadata = make(map[string]string)
 	}
-	for key, value := range sessionpkg.ClosePatch(now.UTC(), string(sessionpkg.StateFailedCreate)) {
+	for key, value := range patch {
 		session.Metadata[key] = value
 	}
-	session.Metadata["pending_create_claim"] = ""
-	session.Metadata["pending_create_started_at"] = ""
+	session.Status = "closed"
+	cancelStateAssignedToRetiredSessionBead(store, session.ID, now, stderr)
 }
 
 func executePlannedStarts(
@@ -1915,7 +1979,7 @@ func executePlannedStartsTraced(
 						}
 					}
 				}
-				item, err := prepareStartCandidateForCity(candidate, cityPath, cityName, cfg, sp, store, clk, stderr)
+				item, err := prepareStartCandidateForCity(candidate, cityPath, cityName, cfg, sp, store, clk, stderr, startOpts.workDirResolver)
 				if err != nil {
 					clearPendingStartInFlightLease(candidate.session, store, stderr)
 					if release != nil {

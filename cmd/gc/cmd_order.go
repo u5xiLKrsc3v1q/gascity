@@ -903,11 +903,10 @@ func doOrderHistoryWithStoresResolver(name, rig string, aa []orders.Order, resol
 			if store == nil {
 				continue
 			}
-			results, err := store.List(beads.ListQuery{
+			results, err := beads.HandlesFor(store).Live.List(beads.ListQuery{
 				Label:         label,
 				IncludeClosed: true,
 				Sort:          beads.SortCreatedDesc,
-				TierMode:      beads.TierBoth,
 			})
 			if err != nil {
 				fmt.Fprintf(stderr, "gc order history: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -1014,11 +1013,10 @@ func findOrder(aa []orders.Order, name, rig string) (orders.Order, bool) {
 }
 
 func bdCursor(store beads.Store, orderName string) (uint64, error) {
-	beadList, err := store.List(beads.ListQuery{
+	beadList, err := beads.HandlesFor(store).Live.List(beads.ListQuery{
 		Label:         "order:" + orderName,
 		IncludeClosed: true,
 		Sort:          beads.SortCreatedDesc,
-		TierMode:      beads.TierBoth,
 	})
 	if err != nil {
 		if len(beadList) == 0 {

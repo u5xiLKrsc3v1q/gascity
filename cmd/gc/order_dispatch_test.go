@@ -1196,6 +1196,90 @@ func TestOrderDispatchMultiple(t *testing.T) {
 	}
 }
 
+func TestOrderDispatchRespectsMaxDispatchesPerTick(t *testing.T) {
+	store := beads.NewMemStore()
+	var aa []orders.Order
+	for i := 0; i < 5; i++ {
+		aa = append(aa, orders.Order{
+			Name:     fmt.Sprintf("order-%d", i),
+			Trigger:  "cooldown",
+			Interval: "1m",
+			Exec:     "true",
+		})
+	}
+	ad := buildOrderDispatcherFromListExec(aa, store, nil, func(context.Context, string, string, []string) ([]byte, error) {
+		return []byte("ok\n"), nil
+	}, nil)
+	if ad == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+	m := ad.(*memoryOrderDispatcher)
+	m.maxDispatchesPerTick = 2
+
+	now := time.Date(2026, 5, 19, 2, 30, 0, 0, time.UTC)
+	ad.dispatch(context.Background(), t.TempDir(), now)
+	ad.drain(context.Background())
+
+	if got := countOrderTrackingRuns(t, store); got != 2 {
+		t.Fatalf("tracking runs after first tick = %d, want 2", got)
+	}
+
+	ad.dispatch(context.Background(), t.TempDir(), now.Add(time.Second))
+	ad.drain(context.Background())
+	if got := countOrderTrackingRuns(t, store); got != 4 {
+		t.Fatalf("tracking runs after second tick = %d, want 4", got)
+	}
+}
+
+func TestOrderDispatchBudgetRotatesAcrossAlwaysDueOrders(t *testing.T) {
+	store := beads.NewMemStore()
+	var aa []orders.Order
+	for i := 0; i < 5; i++ {
+		aa = append(aa, orders.Order{
+			Name:    fmt.Sprintf("condition-%d", i),
+			Trigger: "condition",
+			Check:   "true",
+			Exec:    "true",
+		})
+	}
+	ad := buildOrderDispatcherFromListExec(aa, store, nil, func(context.Context, string, string, []string) ([]byte, error) {
+		return []byte("ok\n"), nil
+	}, nil)
+	if ad == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+	m := ad.(*memoryOrderDispatcher)
+	m.maxDispatchesPerTick = 2
+
+	now := time.Date(2026, 5, 19, 2, 30, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		ad.dispatch(context.Background(), t.TempDir(), now.Add(time.Duration(i)*time.Second))
+		ad.drain(context.Background())
+	}
+
+	for i := 0; i < 5; i++ {
+		label := fmt.Sprintf("order-run:condition-%d", i)
+		if got := len(trackingBeads(t, store, label)); got == 0 {
+			t.Fatalf("%s did not dispatch under a rotating budget", label)
+		}
+	}
+}
+
+func countOrderTrackingRuns(t *testing.T, store beads.Store) int {
+	t.Helper()
+	all, err := store.ListByLabel(labelOrderTracking, 0, beads.IncludeClosed, beads.WithBothTiers)
+	if err != nil {
+		t.Fatalf("ListByLabel(%q): %v", labelOrderTracking, err)
+	}
+	count := 0
+	for _, b := range all {
+		if strings.HasPrefix(b.Title, "order:") {
+			count++
+		}
+	}
+	return count
+}
+
 func TestOrderDispatchCachesLastRunBetweenDispatches(t *testing.T) {
 	store := &countingListStore{Store: beads.NewMemStore()}
 
@@ -2978,6 +3062,48 @@ func TestSweepOrphanedOrderTracking_ClosesOpenTrackingBeads(t *testing.T) {
 	}
 }
 
+func TestSweepOrphanedOrderTrackingLimit_ClosesAtMostBudget(t *testing.T) {
+	store := beads.NewMemStore()
+
+	ids := make([]string, 0, 5)
+	for _, name := range []string{"one", "two", "three", "four", "five"} {
+		b, err := store.Create(beads.Bead{
+			Title:     "order:" + name,
+			Labels:    []string{"order-run:" + name, labelOrderTracking},
+			Ephemeral: true,
+		})
+		if err != nil {
+			t.Fatalf("Create(%s): %v", name, err)
+		}
+		ids = append(ids, b.ID)
+	}
+
+	closed, err := sweepOrphanedOrderTrackingLimit(store, 2)
+	if err != nil {
+		t.Fatalf("sweepOrphanedOrderTrackingLimit: %v", err)
+	}
+	if closed != 2 {
+		t.Fatalf("closed = %d, want 2", closed)
+	}
+
+	closedCount := 0
+	for _, id := range ids {
+		got, err := store.Get(id)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", id, err)
+		}
+		if got.Status == "closed" {
+			closedCount++
+			if got.Metadata["close_reason"] != orphanedOrderTrackingCloseReason {
+				t.Fatalf("close_reason for %s = %q, want %q", id, got.Metadata["close_reason"], orphanedOrderTrackingCloseReason)
+			}
+		}
+	}
+	if closedCount != 2 {
+		t.Fatalf("closed tracking beads = %d, want 2", closedCount)
+	}
+}
+
 func TestSweepOrphanedOrderTracking_NoOrphans(t *testing.T) {
 	store := beads.NewMemStore()
 
@@ -3085,6 +3211,52 @@ func TestSweepStaleOrderTracking_ClosesOnlyOldOpenTrackingBeads(t *testing.T) {
 	}
 	if gotWork.Status != "open" {
 		t.Fatalf("non-tracking work status = %s, want open", gotWork.Status)
+	}
+}
+
+func TestSweepStaleOrderTrackingLimit_ClosesAtMostBudget(t *testing.T) {
+	store := beads.NewMemStore()
+	now := time.Now()
+
+	ids := make([]string, 0, 4)
+	for _, name := range []string{"one", "two", "three", "four"} {
+		b, err := store.Create(beads.Bead{
+			Title:     "order:" + name,
+			Labels:    []string{"order-run:" + name, labelOrderTracking},
+			Ephemeral: true,
+		})
+		if err != nil {
+			t.Fatalf("Create(%s): %v", name, err)
+		}
+		ids = append(ids, b.ID)
+	}
+
+	closed, err := sweepStaleOrderTrackingLimit(store, now.Add(time.Hour), time.Minute, nil, orderTrackingWatchdogMetadataInitiator, 3)
+	if err != nil {
+		t.Fatalf("sweepStaleOrderTrackingLimit: %v", err)
+	}
+	if closed != 3 {
+		t.Fatalf("closed = %d, want 3", closed)
+	}
+
+	closedCount := 0
+	for _, id := range ids {
+		got, err := store.Get(id)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", id, err)
+		}
+		if got.Status == "closed" {
+			closedCount++
+			if got.Metadata["close_reason"] != staleOrderTrackingCloseReason {
+				t.Fatalf("close_reason for %s = %q, want %q", id, got.Metadata["close_reason"], staleOrderTrackingCloseReason)
+			}
+			if got.Metadata["order_tracking_sweep_by"] != orderTrackingWatchdogMetadataInitiator {
+				t.Fatalf("order_tracking_sweep_by for %s = %q, want %q", id, got.Metadata["order_tracking_sweep_by"], orderTrackingWatchdogMetadataInitiator)
+			}
+		}
+	}
+	if closedCount != 3 {
+		t.Fatalf("closed tracking beads = %d, want 3", closedCount)
 	}
 }
 
@@ -3449,13 +3621,14 @@ func buildOrderDispatcherFromListExec(aa []orders.Order, store beads.Store, ep e
 		storeFn: func(_ execStoreTarget) (beads.Store, error) {
 			return store, nil
 		},
-		ep:             ep,
-		execRun:        execRun,
-		rec:            rec,
-		stderr:         lockedStderr(&bytes.Buffer{}),
-		cfg:            cfg,
-		dispatchCtx:    dispatchCtx,
-		dispatchCancel: dispatchCancel,
+		ep:                   ep,
+		execRun:              execRun,
+		rec:                  rec,
+		stderr:               lockedStderr(&bytes.Buffer{}),
+		maxDispatchesPerTick: defaultMaxOrderDispatchesPerTick,
+		cfg:                  cfg,
+		dispatchCtx:          dispatchCtx,
+		dispatchCancel:       dispatchCancel,
 	}
 }
 

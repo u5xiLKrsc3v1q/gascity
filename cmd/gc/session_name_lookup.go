@@ -15,6 +15,10 @@ import (
 
 const poolManagedMetadataKey = "pool_managed"
 
+type explicitBeadIDStore interface {
+	IDPrefix() string
+}
+
 type poolSessionCreateIdentity struct {
 	AgentName string
 	Alias     string
@@ -156,17 +160,22 @@ func createPoolSessionBead(
 	} else {
 		title = agentName
 	}
+	explicitID := poolSessionExplicitBeadID(store, instanceToken)
+	sessionName := pendingPoolSessionName(template, instanceToken)
+	if explicitID != "" {
+		sessionName = PoolSessionName(template, explicitID)
+	}
 	meta := map[string]string{
 		"template":                  template,
 		"agent_name":                agentName,
-		"state":                     "creating",
+		"state":                     string(sessionpkg.StateStartPending),
 		"pending_create_claim":      "true",
 		"pending_create_started_at": pendingCreateStartedAtNow(now),
 		"session_origin":            "ephemeral",
 		"generation":                "1",
 		"continuation_epoch":        "1",
 		"instance_token":            instanceToken,
-		"session_name":              pendingPoolSessionName(template, instanceToken),
+		"session_name":              sessionName,
 		poolManagedMetadataKey:      boolMetadata(true),
 	}
 	if alias := strings.TrimSpace(identity.Alias); alias != "" {
@@ -176,6 +185,7 @@ func createPoolSessionBead(
 		meta["pool_slot"] = strconv.Itoa(identity.Slot)
 	}
 	bead, err := store.Create(beads.Bead{
+		ID:       explicitID,
 		Title:    title,
 		Type:     sessionBeadType,
 		Labels:   []string{sessionBeadLabel, "agent:" + agentName},
@@ -184,16 +194,32 @@ func createPoolSessionBead(
 	if err != nil {
 		return beads.Bead{}, err
 	}
-	sessionName := PoolSessionName(template, bead.ID)
-	if err := store.SetMetadata(bead.ID, "session_name", sessionName); err != nil {
-		_ = store.Close(bead.ID)
-		return beads.Bead{}, err
+	if explicitID != "" && bead.ID == explicitID {
+		bead.Metadata["session_name"] = sessionName
+	} else {
+		sessionName = PoolSessionName(template, bead.ID)
+		if err := store.SetMetadata(bead.ID, "session_name", sessionName); err != nil {
+			_ = store.Close(bead.ID)
+			return beads.Bead{}, err
+		}
+		bead.Metadata["session_name"] = sessionName
 	}
-	bead.Metadata["session_name"] = sessionName
 	if sessionBeads != nil {
 		sessionBeads.add(bead)
 	}
 	return bead, nil
+}
+
+func poolSessionExplicitBeadID(store beads.Store, instanceToken string) string {
+	prefixStore, ok := store.(explicitBeadIDStore)
+	if !ok {
+		return ""
+	}
+	prefix := strings.Trim(strings.TrimSpace(prefixStore.IDPrefix()), "-")
+	if prefix == "" || instanceToken == "" {
+		return ""
+	}
+	return prefix + "-session-" + instanceToken
 }
 
 // resolveSessionName returns the session name for a qualified agent name.
@@ -396,7 +422,7 @@ func poolLookupCandidateStateRank(b beads.Bead) int {
 	switch sessionMetadataState(b) {
 	case "active":
 		return 2
-	case "creating":
+	case "creating", string(sessionpkg.StateStartPending):
 		return 1
 	default:
 		return 0
