@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Drops idx_wisps_type_status_assignee from the Dolt-backed beads wisps table
-# and commits the rollback to Dolt history. Uses the same connection discovery
+# Drops the wisps planner indexes from the Dolt-backed beads wisps table and
+# commits the rollback to Dolt history. Uses the same connection discovery
 # documented in migrate.sh.
 set -euo pipefail
 
@@ -14,19 +14,37 @@ ensure_database_and_table
 
 info "using Dolt database $DOLT_DB on $DOLT_HOST:$DOLT_PORT as $DOLT_USER"
 
+changed=false
 indexes=$(show_wisps_indexes)
 rows=$(index_rows "$indexes")
-if [ "$rows" -eq 0 ]; then
-    info "index $INDEX_NAME is absent; no rollback changes needed"
-    exit 0
+if [ "$rows" -gt 0 ]; then
+    verify_index_definition "$indexes"
+    dolt_sql -q "
+        USE \`$DOLT_DB\`;
+        DROP INDEX $INDEX_NAME ON wisps;
+    " >/dev/null
+    changed=true
+else
+    info "index $INDEX_NAME is absent"
 fi
 
-verify_index_definition "$indexes"
+indexes=$(show_wisps_indexes)
+rows=$(status_index_rows "$indexes")
+if [ "$rows" -gt 0 ]; then
+    verify_status_index_definition "$indexes"
+    dolt_sql -q "
+        USE \`$DOLT_DB\`;
+        DROP INDEX $STATUS_INDEX_NAME ON wisps;
+    " >/dev/null
+    changed=true
+else
+    info "index $STATUS_INDEX_NAME is absent"
+fi
 
-dolt_sql -q "
-    USE \`$DOLT_DB\`;
-    DROP INDEX $INDEX_NAME ON wisps;
-" >/dev/null
+if [ "$changed" = false ]; then
+    info "no rollback changes needed"
+    exit 0
+fi
 
 indexes=$(show_wisps_indexes)
 rows=$(index_rows "$indexes")
@@ -34,5 +52,10 @@ if [ "$rows" -ne 0 ]; then
     die "rollback failed; index $INDEX_NAME is still present"
 fi
 
-commit_schema_change "schema: drop $INDEX_NAME from wisps" >/dev/null
-info "dropped and committed $INDEX_NAME from wisps"
+rows=$(status_index_rows "$indexes")
+if [ "$rows" -ne 0 ]; then
+    die "rollback failed; index $STATUS_INDEX_NAME is still present"
+fi
+
+commit_schema_change "schema: drop wisps planner indexes" >/dev/null
+info "dropped and committed wisps planner indexes"

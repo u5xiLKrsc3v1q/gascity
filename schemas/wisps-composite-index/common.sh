@@ -2,6 +2,8 @@
 
 INDEX_NAME="idx_wisps_type_status_assignee"
 INDEX_COLUMNS="issue_type, status, assignee"
+STATUS_INDEX_NAME="idx_wisps_status"
+STATUS_INDEX_COLUMNS="status"
 COMMIT_AUTHOR="gascity-builder <builder@gascity.local>"
 
 die() {
@@ -280,6 +282,25 @@ verify_index_definition() {
     if [ -n "$missing" ]; then
         die "index $INDEX_NAME exists but does not match ($INDEX_COLUMNS); missing:$missing"
     fi
+}
+
+status_index_rows() {
+    local output="$1"
+
+    printf '%s\n' "$output" | awk -F, -v idx="$STATUS_INDEX_NAME" 'NR > 1 && $3 == idx { count++ } END { print count + 0 }'
+}
+
+verify_status_index_definition() {
+    local output="$1"
+    local count
+
+    count=$(status_index_rows "$output")
+    if [ "$count" -ne 1 ]; then
+        die "index $STATUS_INDEX_NAME has $count column rows; expected exactly 1 for ($STATUS_INDEX_COLUMNS)"
+    fi
+
+    printf '%s\n' "$output" | awk -F, -v idx="$STATUS_INDEX_NAME" 'NR > 1 && $3 == idx && $4 == "1" && $5 == "status" { found = 1 } END { exit found ? 0 : 1 }' \
+        || die "index $STATUS_INDEX_NAME exists but does not match ($STATUS_INDEX_COLUMNS)"
 }
 
 commit_schema_change() {

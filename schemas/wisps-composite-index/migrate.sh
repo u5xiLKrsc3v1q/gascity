@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# Adds idx_wisps_type_status_assignee to the Dolt-backed beads wisps table.
+# Adds the verified-needed wisps indexes to the Dolt-backed beads wisps table:
+#   - idx_wisps_type_status_assignee for mail-check lookups
+#   - idx_wisps_status for PrimeWisps status=open reconciliation
 #
 # Connection discovery order:
 #   database: GC_DOLT_DATABASE, BEADS_DOLT_DATABASE, then .beads/metadata.json dolt_database
@@ -23,21 +25,43 @@ ensure_database_and_table
 
 info "using Dolt database $DOLT_DB on $DOLT_HOST:$DOLT_PORT as $DOLT_USER"
 
+changed=false
 indexes=$(show_wisps_indexes)
 rows=$(index_rows "$indexes")
 if [ "$rows" -gt 0 ]; then
     verify_index_definition "$indexes"
-    info "index $INDEX_NAME already exists on wisps($INDEX_COLUMNS); no changes needed"
-    exit 0
+    info "index $INDEX_NAME already exists on wisps($INDEX_COLUMNS)"
+else
+    dolt_sql -q "
+        USE \`$DOLT_DB\`;
+        CREATE INDEX $INDEX_NAME ON wisps(issue_type, status, assignee);
+    " >/dev/null
+    changed=true
 fi
-
-dolt_sql -q "
-    USE \`$DOLT_DB\`;
-    CREATE INDEX $INDEX_NAME ON wisps(issue_type, status, assignee);
-" >/dev/null
 
 indexes=$(show_wisps_indexes)
 verify_index_definition "$indexes"
 
-commit_schema_change "schema: add $INDEX_NAME on wisps" >/dev/null
-info "created and committed $INDEX_NAME on wisps($INDEX_COLUMNS)"
+indexes=$(show_wisps_indexes)
+rows=$(status_index_rows "$indexes")
+if [ "$rows" -gt 0 ]; then
+    verify_status_index_definition "$indexes"
+    info "index $STATUS_INDEX_NAME already exists on wisps($STATUS_INDEX_COLUMNS)"
+else
+    dolt_sql -q "
+        USE \`$DOLT_DB\`;
+        CREATE INDEX $STATUS_INDEX_NAME ON wisps(status);
+    " >/dev/null
+    changed=true
+fi
+
+indexes=$(show_wisps_indexes)
+verify_status_index_definition "$indexes"
+
+if [ "$changed" = false ]; then
+    info "all wisps indexes already exist; no changes needed"
+    exit 0
+fi
+
+commit_schema_change "schema: add wisps planner indexes" >/dev/null
+info "created and committed missing wisps indexes"
