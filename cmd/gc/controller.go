@@ -1345,6 +1345,7 @@ func runController(
 	cs.emergencyCh = emergencyCh
 	cs.services = cr.svc
 	cs.startBeadEventWatcher(ctx)
+	cs.startEmergencyEventRelay(ctx)
 	cr.setControllerState(cs)
 
 	// Start API server if configured. Standalone city mode wraps the

@@ -266,6 +266,24 @@ func (cs *controllerState) startBeadEventWatcher(ctx context.Context) {
 	}()
 }
 
+func (cs *controllerState) startEmergencyEventRelay(ctx context.Context) {
+	if cs.emergencyCh == nil || cs.eventProv == nil {
+		return
+	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case rec := <-cs.emergencyCh:
+				if err := emergency.RecordSignaled(cs.eventProv, rec); err != nil {
+					log.Printf("api: emergency relay: %v", err)
+				}
+			}
+		}
+	}()
+}
+
 func (cs *controllerState) applyBeadEventToStores(evt events.Event) {
 	if len(evt.Payload) == 0 {
 		return
