@@ -1808,6 +1808,8 @@ func providerLifecycleProcessEnvFromBase(cityPath, provider string, env []string
 		env = removeEnvKey(env, key)
 	}
 	env = append(env, providerLifecycleDoltPathEnv(cityPath)...)
+	env = removeEnvKey(env, "DOLT_DISABLE_EVENT_FLUSH")
+	env = append(env, "DOLT_DISABLE_EVENT_FLUSH=1")
 	if gcBin := resolveProviderLifecycleGCBinary(); gcBin != "" {
 		env = removeEnvKey(env, "GC_BIN")
 		env = append(env, "GC_BIN="+gcBin)

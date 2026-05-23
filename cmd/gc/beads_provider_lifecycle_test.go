@@ -10733,6 +10733,42 @@ func TestGcBeadsBdStartFallsBackToShellManagedConfigWriterWhenGCBinUnset(t *test
 	}
 }
 
+// TestProviderLifecycleProcessEnvIncludesDoltDisableEventFlushForManagedBDProvider
+// verifies that managed bd-provider processes suppress Dolt event flushes.
+func TestProviderLifecycleProcessEnvIncludesDoltDisableEventFlushForManagedBDProvider(t *testing.T) {
+	cityPath := t.TempDir()
+	env := mustProviderLifecycleProcessEnv(t, cityPath, "exec:"+gcBeadsBdScriptPath(cityPath))
+	for _, e := range env {
+		if e == "DOLT_DISABLE_EVENT_FLUSH=1" {
+			return
+		}
+	}
+	t.Error("DOLT_DISABLE_EVENT_FLUSH=1 not found in managed bd provider env")
+}
+
+// TestProviderLifecycleProcessEnvOmitsDoltDisableEventFlushForNonBDProviders
+// verifies the providerUsesBdStoreContract guard.
+func TestProviderLifecycleProcessEnvOmitsDoltDisableEventFlushForNonBDProviders(t *testing.T) {
+	cityPath := t.TempDir()
+	customScript := filepath.Join(t.TempDir(), "custom-beads.sh")
+	for _, tc := range []struct {
+		name     string
+		provider string
+	}{
+		{name: "file", provider: "file"},
+		{name: "external exec", provider: "exec:" + customScript},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := mustProviderLifecycleProcessEnv(t, cityPath, tc.provider)
+			for _, e := range env {
+				if e == "DOLT_DISABLE_EVENT_FLUSH=1" {
+					t.Errorf("DOLT_DISABLE_EVENT_FLUSH=1 should not be set for %s provider", tc.name)
+				}
+			}
+		})
+	}
+}
+
 func TestAcquireProviderSemaphore_SerializesConcurrentOps(t *testing.T) {
 	t.Parallel()
 	cityPath := t.TempDir()
