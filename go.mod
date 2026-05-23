@@ -14,3 +14,6 @@ require (
 	// note: go.uber.org/atomic is only needed for older zap versions; can remove if upgrading zap past v1.27
 	go.uber.org/atomic v1.11.0 // indirect
 )
+
+// forked from gastownhall/gascity for personal learning/experimentation
+// upstream: https://github.com/gastownhall/gascity
