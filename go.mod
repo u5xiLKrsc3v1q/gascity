@@ -1,4 +1,4 @@
-module github.com/gastownhall/gascity
+module github.com/mypersonalfork/gascity
 
 go 1.22
 
