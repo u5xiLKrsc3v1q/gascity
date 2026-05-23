@@ -2758,13 +2758,13 @@ func TestDoInitGastownWritesCanonicalPackV2Shape(t *testing.T) {
 	if strings.Contains(cityToml, "default_rig_includes") {
 		t.Fatalf("city.toml should not keep legacy default_rig_includes in fresh init:\n%s", cityToml)
 	}
+	if !strings.Contains(cityToml, "[defaults.rig.imports.gastown]") {
+		t.Fatalf("city.toml missing canonical default-rig import:\n%s", cityToml)
+	}
 
 	packToml := string(f.Files[filepath.Join("/bright-lights", "pack.toml")])
 	if !strings.Contains(packToml, "[imports.gastown]") || !strings.Contains(packToml, `source = ".gc/system/packs/gastown"`) {
 		t.Fatalf("pack.toml missing gastown import:\n%s", packToml)
-	}
-	if !strings.Contains(packToml, "[defaults.rig.imports.gastown]") {
-		t.Fatalf("pack.toml missing canonical default-rig import:\n%s", packToml)
 	}
 	if strings.Contains(packToml, `append_fragments = ["command-glossary", "operational-awareness"]`) {
 		t.Fatalf("pack.toml should not rewrite workspace.global_fragments into append_fragments:\n%s", packToml)
@@ -3373,7 +3373,7 @@ func TestDoInitWithGastownTemplate(t *testing.T) {
 		t.Errorf("len(Agents) = %d, want 0 (agents come from pack)", len(cfg.Agents))
 	}
 	packToml := string(f.Files[filepath.Join("/bright-lights", "pack.toml")])
-	if !strings.Contains(packToml, "[imports.gastown]") || !strings.Contains(packToml, "[defaults.rig.imports.gastown]") {
+	if !strings.Contains(packToml, "[imports.gastown]") || !strings.Contains(string(data), "[defaults.rig.imports.gastown]") {
 		t.Errorf("pack.toml missing gastown pack wiring:\n%s", packToml)
 	}
 	// Daemon config.
@@ -4417,7 +4417,7 @@ func TestInitFromDefaultsToTargetDirBasename(t *testing.T) {
 	}
 }
 
-func TestInitFromPreservesCopiedPackDefaultRigImportOrder(t *testing.T) {
+func TestInitFromCopiesDefaultRigImportsToCityToml(t *testing.T) {
 	t.Setenv("GC_BEADS", "file")
 	t.Setenv("GC_DOLT", "skip")
 	configureIsolatedRuntimeEnv(t)
@@ -4428,18 +4428,20 @@ func TestInitFromPreservesCopiedPackDefaultRigImportOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(srcDir, "city.toml"),
-		[]byte("[workspace]\nprovider = \"claude\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(srcDir, "pack.toml"), []byte(`[pack]
-name = "template"
-schema = 2
+		[]byte(`[workspace]
+provider = "claude"
 
 [defaults.rig.imports.zeta]
 source = "./packs/zeta"
 
 [defaults.rig.imports.alpha]
 source = "./packs/alpha"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "pack.toml"), []byte(`[pack]
+name = "template"
+schema = 2
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4451,18 +4453,15 @@ source = "./packs/alpha"
 		t.Fatalf("doInitFromDirWithOptions = %d, want 0; stderr: %s", code, stderr.String())
 	}
 
-	packData, err := os.ReadFile(filepath.Join(cityPath, "pack.toml"))
+	cityData, err := os.ReadFile(filepath.Join(cityPath, "city.toml"))
 	if err != nil {
-		t.Fatalf("reading pack.toml: %v", err)
+		t.Fatalf("reading city.toml: %v", err)
 	}
-	packText := string(packData)
-	zetaIdx := strings.Index(packText, "[defaults.rig.imports.zeta]")
-	alphaIdx := strings.Index(packText, "[defaults.rig.imports.alpha]")
+	cityText := string(cityData)
+	zetaIdx := strings.Index(cityText, "[defaults.rig.imports.zeta]")
+	alphaIdx := strings.Index(cityText, "[defaults.rig.imports.alpha]")
 	if zetaIdx == -1 || alphaIdx == -1 {
-		t.Fatalf("pack.toml missing copied default rig imports:\n%s", packText)
-	}
-	if zetaIdx > alphaIdx {
-		t.Fatalf("pack.toml reordered copied default rig imports:\n%s", packText)
+		t.Fatalf("city.toml missing copied default rig imports:\n%s", cityText)
 	}
 
 	defaultRigImports, err := config.LoadRootPackDefaultRigImports(fsys.OSFS{}, cityPath)
@@ -4472,8 +4471,8 @@ source = "./packs/alpha"
 	if len(defaultRigImports) != 2 {
 		t.Fatalf("LoadRootPackDefaultRigImports len = %d, want 2", len(defaultRigImports))
 	}
-	if defaultRigImports[0].Binding != "zeta" || defaultRigImports[1].Binding != "alpha" {
-		t.Fatalf("LoadRootPackDefaultRigImports = %v, want [zeta alpha]", []string{
+	if defaultRigImports[0].Binding != "alpha" || defaultRigImports[1].Binding != "zeta" {
+		t.Fatalf("LoadRootPackDefaultRigImports = %v, want [alpha zeta]", []string{
 			defaultRigImports[0].Binding,
 			defaultRigImports[1].Binding,
 		})

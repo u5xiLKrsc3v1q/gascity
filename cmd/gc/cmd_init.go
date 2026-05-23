@@ -621,6 +621,7 @@ func splitInitConfig(cityName string, cfg *config.City) (initPackConfig, config.
 	cityCfg.Patches = config.Patches{}
 	cityCfg.AgentDefaults = config.AgentDefaults{}
 	cityCfg.AgentsDefaults = config.AgentDefaults{}
+	cityCfg.Defaults = config.PackDefaults{}
 	cityCfg.Workspace.Name = ""
 	cityCfg.Workspace.Prefix = ""
 
@@ -660,15 +661,15 @@ func splitInitConfig(cityName string, cfg *config.City) (initPackConfig, config.
 		cityCfg.Workspace.SetLegacyIncludes(nil)
 	}
 	if len(cfg.DefaultRigImports) > 0 {
-		defaults := packDefaults{
-			Rig: packRigDefaults{
+		defaults := config.PackDefaults{
+			Rig: config.PackRigDefaults{
 				Imports: make(map[string]config.Import, len(cfg.DefaultRigImports)),
 			},
 		}
 		for name, imp := range cfg.DefaultRigImports {
 			defaults.Rig.Imports[name] = imp
 		}
-		packCfg.Defaults = defaults
+		cityCfg.Defaults = defaults
 		cityCfg.Workspace.SetLegacyDefaultRigIncludes(nil)
 	}
 	return packCfg, cityCfg
