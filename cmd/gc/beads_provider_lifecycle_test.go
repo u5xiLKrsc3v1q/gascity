@@ -10769,6 +10769,70 @@ func TestProviderLifecycleProcessEnvOmitsDoltDisableEventFlushForNonBDProviders(
 	}
 }
 
+// TestEnsureBeadsProviderCallsDoltConfigMetricsDisabledBeforeStart verifies
+// that managed bd startup disables Dolt metrics collection before start.
+func TestEnsureBeadsProviderCallsDoltConfigMetricsDisabledBeforeStart(t *testing.T) {
+	dir := t.TempDir()
+	script := gcBeadsBdScriptPath(dir)
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nset -eu\nexit 2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	doltCallFile := filepath.Join(dir, "dolt-calls.log")
+	fakeBinDir := t.TempDir()
+	fakeDolt := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %q\nexit 0\n", doltCallFile)
+	if err := os.WriteFile(filepath.Join(fakeBinDir, "dolt"), []byte(fakeDolt), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeReachableProviderManagedDoltState(t, dir)
+	t.Setenv("GC_BEADS", "bd")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", fakeBinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := ensureBeadsProvider(dir); err != nil {
+		t.Fatalf("ensureBeadsProvider: %v", err)
+	}
+
+	data, err := os.ReadFile(doltCallFile)
+	if err != nil {
+		t.Fatalf("dolt was not invoked (want dolt config metrics.disabled call): %v", err)
+	}
+	if !strings.Contains(string(data), "config --global --add metrics.disabled true") {
+		t.Errorf("dolt config --global --add metrics.disabled true was not called; got:\n%s", data)
+	}
+}
+
+// TestEnsureBeadsProviderDoltConfigFailureIsNonFatal verifies that a failing
+// dolt config call does not prevent managed bd startup.
+func TestEnsureBeadsProviderDoltConfigFailureIsNonFatal(t *testing.T) {
+	dir := t.TempDir()
+	script := gcBeadsBdScriptPath(dir)
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nset -eu\nexit 2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeBinDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fakeBinDir, "dolt"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeReachableProviderManagedDoltState(t, dir)
+	t.Setenv("GC_BEADS", "bd")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", fakeBinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := ensureBeadsProvider(dir); err != nil {
+		t.Fatalf("ensureBeadsProvider = %v, want nil (dolt config failure must be non-fatal)", err)
+	}
+}
+
 func TestAcquireProviderSemaphore_SerializesConcurrentOps(t *testing.T) {
 	t.Parallel()
 	cityPath := t.TempDir()

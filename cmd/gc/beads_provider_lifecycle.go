@@ -668,6 +668,7 @@ func ensureBeadsProvider(cityPath string) error {
 			if err := standaloneBdDoltConflictIfPresent(cityPath); err != nil {
 				return err
 			}
+			ensureManagedDoltMetricsDisabled()
 		}
 		providerEnv, envErr := providerLifecycleProcessEnvWithError(cityPath, provider)
 		if envErr != nil {
@@ -692,6 +693,24 @@ func ensureBeadsProvider(cityPath string) error {
 		}
 	}
 	return nil
+}
+
+func ensureManagedDoltMetricsDisabled() {
+	ctx, cancel := providerLifecycleContext(context.Background(), providerOpTimeout("config"))
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "dolt", "config", "--global", "--add", "metrics.disabled", "true")
+	cmd.WaitDelay = 2 * time.Second
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return
+	}
+	msg := strings.TrimSpace(string(out))
+	if msg != "" {
+		log.Printf("gc: managed dolt metrics.disabled config failed: %v: %s", err, msg)
+		return
+	}
+	log.Printf("gc: managed dolt metrics.disabled config failed: %v", err)
 }
 
 // shutdownBeadsProvider stops the bead store's backing service.
