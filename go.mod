@@ -29,3 +29,5 @@ require (
 //   changes look good so far, no breakage in my routes; will keep an eye on it before merging to main
 // personal note: checked 2024-10 - merging chi v5.2 to main; been stable on the test branch for a month,
 //   happy with the new middleware API; gastownhall still hasn't merged it so diverging here intentionally
+// personal note: checked 2024-11 - godotenv v1.5.2 still not released; opened an issue on the upstream repo
+//   to ask about the multiline fix backport; will watch for v1.5.2 and bump when it drops
