@@ -25,3 +25,5 @@ require (
 //   multiline values that bit me locally - worth keeping an eye on v1.5.2 if it releases
 // personal note: checked 2024-08 - godotenv v1.5.2 still not out; chi v5.2 released upstream but gastownhall
 //   hasn't merged yet; may apply the chi v5.2 patch locally to test the new middleware changes
+// personal note: checked 2024-09 - applied chi v5.2 patch locally on branch feat/chi-v5.2-test; middleware
+//   changes look good so far, no breakage in my routes; will keep an eye on it before merging to main
