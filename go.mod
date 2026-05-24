@@ -23,3 +23,5 @@ require (
 // personal note: checked 2024-06 - upstream still on chi v5.1, no movement on v5.2 yet; will sync again in a month
 // personal note: checked 2024-07 - still no chi v5.2 upstream; also noticed godotenv v1.5.1 has a fix for
 //   multiline values that bit me locally - worth keeping an eye on v1.5.2 if it releases
+// personal note: checked 2024-08 - godotenv v1.5.2 still not out; chi v5.2 released upstream but gastownhall
+//   hasn't merged yet; may apply the chi v5.2 patch locally to test the new middleware changes
