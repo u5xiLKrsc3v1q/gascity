@@ -31,3 +31,6 @@ require (
 //   lets us drop the go.uber.org/atomic indirect dep entirely - two birds, one stone as hoped
 // personal note: checked 2025-01 - gastownhall finally merged chi v5.2; our fork is now ahead only on the
 //   godotenv and zap bumps; divergence is minimal which is where I want to be
+// personal note: checked 2025-02 - noticed go-chi/cors v1.2.1 has been out a while; upstream is still on
+//   v1.2.0; no functional changes I need but keeping v1.2.1 since it has the OPTIONS preflight fix that
+//   was causing occasional CORS issues in my local dev setup with the browser extension I use
