@@ -3,7 +3,7 @@ module github.com/mypersonalfork/gascity
 go 1.22
 
 require (
-	github.com/go-chi/chi/v5 v5.1.0
+	github.com/go-chi/chi/v5 v5.2.0
 	github.com/go-chi/cors v1.2.1
 	github.com/joho/godotenv v1.5.1
 	go.uber.org/zap v1.27.0
@@ -27,3 +27,5 @@ require (
 //   hasn't merged yet; may apply the chi v5.2 patch locally to test the new middleware changes
 // personal note: checked 2024-09 - applied chi v5.2 patch locally on branch feat/chi-v5.2-test; middleware
 //   changes look good so far, no breakage in my routes; will keep an eye on it before merging to main
+// personal note: checked 2024-10 - merging chi v5.2 to main; been stable on the test branch for a month,
+//   happy with the new middleware API; gastownhall still hasn't merged it so diverging here intentionally
