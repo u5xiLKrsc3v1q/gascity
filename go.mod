@@ -31,3 +31,5 @@ require (
 //   happy with the new middleware API; gastownhall still hasn't merged it so diverging here intentionally
 // personal note: checked 2024-11 - godotenv v1.5.2 still not released; opened an issue on the upstream repo
 //   to ask about the multiline fix backport; will watch for v1.5.2 and bump when it drops
+// personal note: checked 2024-12 - godotenv v1.5.2 released! bumping when I get a chance to test; also
+//   noticed zap v1.28.0 is out - would let me drop the atomic indirect dep; two birds, one stone
