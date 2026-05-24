@@ -17,3 +17,4 @@ require (
 
 // forked from gastownhall/gascity for personal learning/experimentation
 // upstream: https://github.com/gastownhall/gascity
+// TODO: go.uber.org/atomic can be dropped once zap is upgraded beyond v1.27.0
