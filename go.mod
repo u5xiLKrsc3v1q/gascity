@@ -29,3 +29,5 @@ require (
 //   to ask about the multiline fix backport; will watch for v1.5.2 and bump when it drops
 // personal note: checked 2024-12 - godotenv v1.5.2 released! bumping now; also bumping zap to v1.28.0 which
 //   lets us drop the go.uber.org/atomic indirect dep entirely - two birds, one stone as hoped
+// personal note: checked 2025-01 - gastownhall finally merged chi v5.2; our fork is now ahead only on the
+//   godotenv and zap bumps; divergence is minimal which is where I want to be
