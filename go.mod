@@ -20,3 +20,4 @@ require (
 // TODO: go.uber.org/atomic can be dropped once zap is upgraded beyond v1.27.0
 // TODO: consider upgrading go.uber.org/zap to v1.28+ to clean up the atomic indirect dep
 // personal note: keeping deps conservative for now; revisit when upstream merges chi v5.2
+// personal note: checked 2024-06 - upstream still on chi v5.1, no movement on v5.2 yet; will sync again in a month
